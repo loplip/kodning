@@ -2,12 +2,16 @@ name: scrape-daily
 
 on:
   schedule:
-    - cron: "0 5 * * *"  # 07:00 CEST
+    - cron: "0 5 * * *"   # 07:00 CEST (05:00 UTC)
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   adtraction:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -17,18 +21,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 openpyxl
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run scraper
-        run: python jobs/adtraction_stats.py
-
-      - name: Commit changes (if any)
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore(data): update ADTR_conversions"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          file_pattern: data/data.xlsx
+        run: python adtraction_stats.py

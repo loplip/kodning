@@ -9,7 +9,7 @@ from openpyxl import Workbook, load_workbook
 
 URL = "https://adtraction.com/se/om-adtraction/"
 DATASET = "ADTR_conversions"
-OUT_PATH = Path("data/data.xlsx")  # xlsx istället för csv
+OUT_PATH = Path("data.xlsx")  # nu i roten
 TZ = ZoneInfo("Europe/Stockholm")
 
 LABELS = {
@@ -18,9 +18,7 @@ LABELS = {
 }
 
 def fetch_html(url: str) -> str:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(url, headers=headers, timeout=30)
     r.raise_for_status()
     return r.text
@@ -44,13 +42,10 @@ def ensure_workbook(path: Path) -> Workbook:
     if path.exists():
         wb = load_workbook(path)
     else:
-        path.parent.mkdir(parents=True, exist_ok=True)
         wb = Workbook()
-        # Döp första bladet till vår dataset-flik
         ws = wb.active
         ws.title = DATASET
         ws.append(["datum", "dataset", "konverteringar", "varumärken"])
-    # Säkerställ att fliken finns
     if DATASET not in wb.sheetnames:
         ws = wb.create_sheet(DATASET)
         ws.append(["datum", "dataset", "konverteringar", "varumärken"])
@@ -59,19 +54,13 @@ def ensure_workbook(path: Path) -> Workbook:
 def append_row_xlsx(path: Path, row: dict):
     wb = ensure_workbook(path)
     ws = wb[DATASET]
-
-    # undvik dublett för samma datum+dataset
     datum_s = row["datum"]
     for r in ws.iter_rows(min_row=2, values_only=True):
-        if not r or len(r) < 2:
-            continue
-        if r[0] == datum_s and r[1] == row["dataset"]:
-            print("Rad för dagens datum finns redan – hoppar över.")
-            wb.save(path)
-            return
-
+        if r and len(r) >= 2 and r[0] == datum_s and r[1] == row["dataset"]:
+            return None
     ws.append([row["datum"], row["dataset"], row["konverteringar"], row["varumärken"]])
     wb.save(path)
+    return (row["datum"], row["konverteringar"], row["varumärken"])
 
 def main():
     html = fetch_html(URL)
@@ -79,14 +68,17 @@ def main():
     today = datetime.datetime.now(TZ).date()
     timestamp = datetime.datetime.combine(today, datetime.time(7, 0, 0, tzinfo=TZ))
     datum = timestamp.strftime("%Y-%m-%d %H:%M")
-
-    append_row_xlsx(OUT_PATH, {
+    added = append_row_xlsx(OUT_PATH, {
         "datum": datum,
         "dataset": DATASET,
         "konverteringar": nums["conversions"],
         "varumärken": nums["brands"],
     })
-    print("OK")
+    if added is None:
+        print("Rad för dagens datum finns redan – hoppar över.")
+    else:
+        d, conv, brands = added
+        print(f"Lade till:\nDatum\t\tKonverteringar\tVarumärken\n{d}\t{conv}\t{brands}")
 
 if __name__ == "__main__":
     try:

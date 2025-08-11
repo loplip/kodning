@@ -10,14 +10,11 @@
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance"
-      ],
-      "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python"
-      }
+        "ms-python.vscode-pylance",
+        "cweijan.vscode-office"          // <<— öppnar .xlsx i VS Code
+        // Alternativ: "GrapeCity.gc-excelviewer"
+      ]
     }
   },
-  "remoteEnv": {
-    "TZ": "Europe/Stockholm"
-  }
+  "remoteEnv": { "TZ": "Europe/Stockholm" }
 }
