@@ -9,7 +9,7 @@ from openpyxl import Workbook, load_workbook
 
 URL = "https://adtraction.com/se/om-adtraction/"
 DATASET = "ADTR_conversions"
-OUT_PATH = Path("data/rådata.xlsx")  # xlsx istället för csv
+OUT_PATH = Path("data/data.xlsx")  # xlsx istället för csv
 TZ = ZoneInfo("Europe/Stockholm")
 
 LABELS = {

@@ -31,4 +31,4 @@ jobs:
           commit_message: "chore(data): update ADTR_conversions"
           commit_user_name: "github-actions[bot]"
           commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          file_pattern: data/rådata.xlsx
+          file_pattern: data/data.xlsx
