@@ -22,6 +22,11 @@ def fetch_konverteringar():
     return siffra
 
 def log_konverteringar():
+    # Skapa filen om den inte finns
+    if not os.path.exists(OUTFILE):
+        with open(OUTFILE, "w", encoding="utf-8") as f:
+            f.write("Datum Konverteringar\n")  # valfri rubrikrad
+
     siffra = fetch_konverteringar()
     datum = datetime.now().strftime("%Y-%m-%d %H:%M")
     with open(OUTFILE, "a", encoding="utf-8") as f:
