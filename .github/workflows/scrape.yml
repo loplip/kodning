@@ -2,7 +2,7 @@ name: scrape-daily
 
 on:
   schedule:
-    - cron: "0 5 * * *"   # 07:00 CEST (05:00 UTC)
+    - cron: "17-29/3 14 * * *"  # var 3:e minut från 14:17 till 14:29 UTC (16:17–16:29 CEST)
   workflow_dispatch:
 
 permissions:

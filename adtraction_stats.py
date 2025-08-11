@@ -8,8 +8,8 @@ from bs4 import BeautifulSoup
 from openpyxl import Workbook, load_workbook
 
 URL = "https://adtraction.com/se/om-adtraction/"
-DATASET = "ADTR_conversions"
-OUT_PATH = Path("data.xlsx")  # nu i roten
+SHEET_NAME = "ADTR_conversions"
+OUT_PATH = Path("data.xlsx")
 TZ = ZoneInfo("Europe/Stockholm")
 
 LABELS = {
@@ -44,21 +44,21 @@ def ensure_workbook(path: Path) -> Workbook:
     else:
         wb = Workbook()
         ws = wb.active
-        ws.title = DATASET
-        ws.append(["datum", "dataset", "konverteringar", "varumärken"])
-    if DATASET not in wb.sheetnames:
-        ws = wb.create_sheet(DATASET)
-        ws.append(["datum", "dataset", "konverteringar", "varumärken"])
+        ws.title = SHEET_NAME
+        ws.append(["datum", "konverteringar", "varumärken"])
+    if SHEET_NAME not in wb.sheetnames:
+        ws = wb.create_sheet(SHEET_NAME)
+        ws.append(["datum", "konverteringar", "varumärken"])
     return wb
 
 def append_row_xlsx(path: Path, row: dict):
     wb = ensure_workbook(path)
-    ws = wb[DATASET]
+    ws = wb[SHEET_NAME]
     datum_s = row["datum"]
     for r in ws.iter_rows(min_row=2, values_only=True):
-        if r and len(r) >= 2 and r[0] == datum_s and r[1] == row["dataset"]:
+        if r and r[0] == datum_s:
             return None
-    ws.append([row["datum"], row["dataset"], row["konverteringar"], row["varumärken"]])
+    ws.append([row["datum"], row["konverteringar"], row["varumärken"]])
     wb.save(path)
     return (row["datum"], row["konverteringar"], row["varumärken"])
 
@@ -70,7 +70,6 @@ def main():
     datum = timestamp.strftime("%Y-%m-%d %H:%M")
     added = append_row_xlsx(OUT_PATH, {
         "datum": datum,
-        "dataset": DATASET,
         "konverteringar": nums["conversions"],
         "varumärken": nums["brands"],
     })
