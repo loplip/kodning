@@ -1,32 +1,60 @@
-import requests
-from bs4 import BeautifulSoup
+import os
 from datetime import datetime
 
-URL = "https://adtraction.com/se/om-adtraction"
-OUTFILE = "Adtraction_conversions.txt"
+import requests
+from bs4 import BeautifulSoup
 
-def fetch_konverteringar():
+
+URL = "https://adtraction.com/se/om-adtraction"
+OUTFILE = "adtraction_statistics.csv"
+
+
+def fetch_statistics():
+    """Hämta statistik-rutor från Adtractions "om"-sida.
+
+    Returnerar en lista av tuple (titel, värde) i samma ordning som de
+    förekommer på sidan.
+    """
+
     response = requests.get(URL)
     response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-    # Leta efter rätt container: "Konverteringar" och ta nästa element med siffran
-    box = soup.find(lambda tag: tag.name == "div" and "Konverteringar" in tag.text)
-    if not box:
-        raise Exception("Kunde inte hitta 'Konverteringar'")
-    # Siffran finns som ett <span> eller <div> med siffran, hitta första siffersträng
-    import re
-    match = re.search(r"(\d[\d ]+\d)", box.text)
-    if not match:
-        raise Exception("Kunde inte hitta siffersträng i 'Konverteringar'-rutan")
-    siffra = int(match.group(1).replace(" ", ""))
-    return siffra
 
-def log_konverteringar():
-    siffra = fetch_konverteringar()
+    soup = BeautifulSoup(response.text, "html.parser")
+    boxes = soup.find_all("div", class_="statistics_card_container")
+    if not boxes:
+        raise Exception("Kunde inte hitta statistikrutor på sidan")
+
+    stats = []
+    for box in boxes:
+        title_tag = box.find(class_="statistics_card_title")
+        value_tag = box.find(class_="statistics_card_text")
+        if not title_tag or not value_tag:
+            continue
+
+        # Ta bort mellanslag i siffran för att kunna konvertera till int
+        value = int(value_tag.text.strip().replace(" ", ""))
+        stats.append((title_tag.text.strip(), value))
+
+    return stats
+
+
+def log_statistics():
+    stats = fetch_statistics()
     datum = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Skapa filen med rubriker om den inte finns
+    file_exists = os.path.exists(OUTFILE)
     with open(OUTFILE, "a", encoding="utf-8") as f:
-        f.write(f"{datum} {siffra}\n")
-    print(f"{datum} {siffra}")
+        if not file_exists:
+            headers = ["timestamp"] + [title for title, _ in stats]
+            f.write(",".join(headers) + "\n")
+
+        values = [datum] + [str(value) for _, value in stats]
+        f.write(",".join(values) + "\n")
+
+    print(datum, dict(stats))
+
 
 if __name__ == "__main__":
-    log_konverteringar()
+    log_statistics()
+
