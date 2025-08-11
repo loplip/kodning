@@ -2,29 +2,58 @@ name: Logga konverteringar dagligen
 
 on:
   schedule:
-    - cron: '40 10 * * *'  # 12:40 CEST (10:40 UTC)
-    - cron: '50 10 * * *'  # 12:50 CEST (10:50 UTC)
-    - cron: '0 11 * * *'   # 13:00 CEST (11:00 UTC)
-    - cron: '10 11 * * *'  # 13:10 CEST (11:10 UTC)
+    - cron: '40 10 * * *'  # 10:40 UTC (12:40 CEST)
+    - cron: '50 10 * * *'  # 10:50 UTC (12:50 CEST)
+    - cron: '0 11 * * *'   # 11:00 UTC (13:00 CEST)
+    - cron: '10 11 * * *'  # 11:10 UTC (13:10 CEST)
   workflow_dispatch:
+
+# 1) Ge token skriv-rätt (viktigt för schemalagda körningar)
+permissions:
+  contents: write
+
+# 4) Undvik krockar om ett jobb överlappar nästa
+concurrency:
+  group: log-konverteringar
+  cancel-in-progress: false
 
 jobs:
   log-konverteringar:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0  # 3) inte shallow, underlättar rebase/push
 
-    - name: Installera beroenden
-      run: pip install requests beautifulsoup4
+      - name: Installera beroenden
+        run: pip install requests beautifulsoup4
 
-    - name: Kör scriptet
-      run: python adtraction_konverteringar_scrape.py
+      - name: Kör scriptet
+        run: python adtraction_konverteringar_scrape.py
 
-    - name: Committa och pusha loggen
-      run: |
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add konverteringar_log.txt
-        git commit -m "Uppdaterad logg: $(date --iso-8601=minutes)" || echo "Inget att committa"
-        git push
+      - name: Git setup
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # (Säkerställ att repo är "safe dir"; checkout@v4 brukar fixa detta, men extra skydd skadar inte)
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Commit & push (robust)
+        run: |
+          set -e
+          branch="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+          echo "Jobbar på branch: $branch"
+          git pull --rebase origin "$branch" || true
+          # 2) Lägg till allt – slipper hårdkodat filnamn
+          git add -A
+          # Commita bara om något ändrats
+          if ! git diff --cached --quiet; then
+            git commit -m "Uppdaterad logg: $(date --iso-8601=minutes)"
+            # En enkel retry om remote uppdaterats precis
+            git push origin "$branch" || (git pull --rebase origin "$branch" && git push origin "$branch")
+          else
+            echo "Inget att committa"
+          fi
