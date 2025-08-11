@@ -8,11 +8,9 @@ on:
     - cron: '10 11 * * *'  # 11:10 UTC (13:10 CEST)
   workflow_dispatch:
 
-# 1) Ge token skriv-rätt (viktigt för schemalagda körningar)
 permissions:
   contents: write
 
-# 4) Undvik krockar om ett jobb överlappar nästa
 concurrency:
   group: log-konverteringar
   cancel-in-progress: false
@@ -26,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
-          fetch-depth: 0  # 3) inte shallow, underlättar rebase/push
+          fetch-depth: 0
 
       - name: Installera beroenden
         run: pip install requests beautifulsoup4
@@ -38,21 +36,17 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # (Säkerställ att repo är "safe dir"; checkout@v4 brukar fixa detta, men extra skydd skadar inte)
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Commit & push (robust)
+      - name: Commit & push (endast loggfilen)
         run: |
           set -e
           branch="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
           echo "Jobbar på branch: $branch"
           git pull --rebase origin "$branch" || true
-          # 2) Lägg till allt – slipper hårdkodat filnamn
-          git add -A
-          # Commita bara om något ändrats
+          git add "Adtraction_conversions.txt"
           if ! git diff --cached --quiet; then
             git commit -m "Uppdaterad logg: $(date --iso-8601=minutes)"
-            # En enkel retry om remote uppdaterats precis
             git push origin "$branch" || (git pull --rebase origin "$branch" && git push origin "$branch")
           else
             echo "Inget att committa"
