@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 URL = "https://adtraction.com/se/om-adtraction"
-OUTFILE = "konverteringar_log.txt"
+OUTFILE = "Adtraction_conversions.txt"
 
 def fetch_konverteringar():
     response = requests.get(URL)
