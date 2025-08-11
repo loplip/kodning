@@ -1,0 +1,30 @@
+name: Logga konverteringar dagligen
+
+on:
+  schedule:
+    - cron: '40 10 * * *'  # 12:40 CEST (10:40 UTC)
+    - cron: '50 10 * * *'  # 12:50 CEST (10:50 UTC)
+    - cron: '0 11 * * *'   # 13:00 CEST (11:00 UTC)
+    - cron: '10 11 * * *'  # 13:10 CEST (11:10 UTC)
+  workflow_dispatch:
+
+jobs:
+  log-konverteringar:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Installera beroenden
+      run: pip install requests beautifulsoup4
+
+    - name: Kör scriptet
+      run: python adtraction_konverteringar_scrape.py
+
+    - name: Committa och pusha loggen
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add konverteringar_log.txt
+        git commit -m "Uppdaterad logg: $(date --iso-8601=minutes)" || echo "Inget att committa"
+        git push
