@@ -65,19 +65,26 @@ def append_row_xlsx(path: Path, row: dict):
 def main():
     html = fetch_html(URL)
     nums = parse_numbers(html)
-    today = datetime.datetime.now(TZ).date()
-    timestamp = datetime.datetime.combine(today, datetime.time(7, 0, 0, tzinfo=TZ))
+
+    # Alltid nuvarande datum och tid
+    timestamp = datetime.datetime.now(TZ).replace(second=0, microsecond=0)
     datum = timestamp.strftime("%Y-%m-%d %H:%M")
-    added = append_row_xlsx(OUT_PATH, {
-        "datum": datum,
-        "konverteringar": nums["conversions"],
-        "varumärken": nums["brands"],
-    })
+
+    added = append_row_xlsx(
+        OUT_PATH,
+        {
+            "datum": datum,
+            "konverteringar": nums["conversions"],
+            "varumärken": nums["brands"],
+        }
+    )
+
     if added is None:
-        print("Rad för dagens datum finns redan – hoppar över.")
+        print("Rad för angiven tidsstämpel finns redan – hoppar över.")
     else:
         d, conv, brands = added
         print(f"Lade till:\nDatum\t\tKonverteringar\tVarumärken\n{d}\t{conv}\t{brands}")
+    print(f"Filen: {OUT_PATH.resolve()}")
 
 if __name__ == "__main__":
     try:

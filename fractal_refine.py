@@ -15,7 +15,6 @@ SKIP_SPONSORED = True
 XLSX_FILE  = "data.xlsx"
 SHEET_NAME = "FRCTL_chair"
 
-# Fångar både titel och "Primary Color: ..." + varianter
 PATTERNS = {
     "fabric_dark": re.compile(
         r"fractal\s+(?:design\s+)?refine.*?(fabric|woven).*?(dark|black|charcoal|noir|graphite|charcoal\s*gray|grey)",
@@ -29,8 +28,7 @@ PATTERNS = {
     "mesh_light": re.compile(
         r"fractal\s+(?:design\s+)?refine.*?mesh.*?(light|white|silver|light\s*gray|light\s*grey|grey|gray)",
         re.I | re.S),
-    "alcantara": re.compile(
-        r"fractal\s+(?:design\s+)?refine.*?alcantara", re.I | re.S),
+    "alcantara": re.compile(r"fractal\s+(?:design\s+)?refine.*?alcantara", re.I | re.S),
 }
 
 HEADERS = {
@@ -52,10 +50,8 @@ def looks_sponsored(tile):
     return "sponsored" in txt or "advertisement" in txt
 
 def normalize_text(s: str) -> str:
-    # NFKC + strip varumärkessymboler etc så regex blir enklare
     s = unicodedata.normalize("NFKC", s)
-    s = s.replace("®", " ").replace("™", " ")
-    return s
+    return s.replace("®", " ").replace("™", " ")
 
 def parse_html(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -66,7 +62,6 @@ def parse_html(html):
             continue
         a = tile.select_one("a.item-title")
         title = a.get_text(strip=True) if a else ""
-        # plocka även specar (Primary Color, Material etc)
         spec = tile.get_text(" ", strip=True)
         fulltext = normalize_text((title + " " + spec)).lower()
         items.append({"idx_on_page": idx_on_page, "title": title, "fulltext": fulltext})
@@ -102,16 +97,14 @@ def find_positions():
         for visible_idx, it in enumerate(items, start=1):
             global_pos = (page - 1) * PAGE_SIZE + visible_idx
             txt = it["fulltext"]
-            # kräv att det är en Fractal Refine-stol
             if "fractal" not in txt or "refine" not in txt:
                 continue
-            # tillåt att färg kan ligga i "Primary Color: Mesh Light/Fabric Light"
             for key, pattern in PATTERNS.items():
                 if positions[key] is None and pattern.search(txt):
                     positions[key] = global_pos
     return positions
 
-def save_to_excel(date_str, store, pos):
+def save_to_excel(date_time_str, store, pos):
     if os.path.exists(XLSX_FILE):
         wb = load_workbook(XLSX_FILE)
     else:
@@ -122,14 +115,14 @@ def save_to_excel(date_str, store, pos):
         ws = wb.create_sheet(SHEET_NAME)
         ws.append([
             "Datum", "Butik",
-            "Fractal Refine Fabric Dark", "Fractal Refine Fabric Light",
-            "Fractal Refine Mesh Dark",   "Fractal Refine Mesh Light",
-            "Fractal Refine Alcantara"
+            "Refine Fabric Dark", "Refine Fabric Light",
+            "Refine Mesh Dark",   "Refine Mesh Light",
+            "Refine Alcantara"
         ])
     else:
         ws = wb[SHEET_NAME]
     ws.append([
-        date_str, store,
+        date_time_str, store,
         pos["fabric_dark"], pos["fabric_light"],
         pos["mesh_dark"], pos["mesh_light"],
         pos["alcantara"]
@@ -137,11 +130,15 @@ def save_to_excel(date_str, store, pos):
     wb.save(XLSX_FILE)
 
 if __name__ == "__main__":
-    today = datetime.date.today().isoformat()
+    # YYYY-MM-DD HH:MM
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     store = "Newegg"
     pos = find_positions()
-    save_to_excel(today, store, pos)
-    print("\"Datum\" \"Butik\" \"Fractal Refine Fabric Dark\" \"Fractal Refine Fabric Light\" "
-          "\"Fractal Refine Mesh Dark\" \"Fractal Refine Mesh Light\" \"Fractal Refine Alcantara\"")
-    print(f"{today} {store} {pos['fabric_dark'] or '-'} {pos['fabric_light'] or '-'} "
-          f"{pos['mesh_dark'] or '-'} {pos['mesh_light'] or '-'} {pos['alcantara'] or '-'}")
+    save_to_excel(now_str, store, pos)
+
+    x = pos["fabric_dark"]  if pos["fabric_dark"]  is not None else "-"
+    y = pos["fabric_light"] if pos["fabric_light"] is not None else "-"
+    z = pos["mesh_dark"]    if pos["mesh_dark"]    is not None else "-"
+    v = pos["mesh_light"]   if pos["mesh_light"]   is not None else "-"
+    w = pos["alcantara"]    if pos["alcantara"]    is not None else "-"
+    print(f"La till positionerna {x}, {y}, {z}, {v}, {w} i FRCTL_chair")
