@@ -2,14 +2,14 @@ name: scrape-daily
 
 on:
   schedule:
-    - cron: "17-29/3 14 * * *"  # var 3:e minut från 14:17 till 14:29 UTC (16:17–16:29 CEST)
+    - cron: "0 5 * * *"  # 05:00 UTC dagligen ≈ 07:00 i Sverige under sommartid (CEST)
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  adtraction:
+  run-scripts:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,5 +26,14 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run scraper
+      - name: Run adtraction_stats.py
         run: python adtraction_stats.py
+
+      - name: Run fractal_headset.py
+        run: python fractal_headset.py
+
+      - name: Run fractal_refine.py
+        run: python fractal_refine.py
+
+      - name: Run soder_stats.py
+        run: python soder_stats.py
