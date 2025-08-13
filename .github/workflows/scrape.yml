@@ -2,7 +2,7 @@ name: scrape-daily
 
 on:
   schedule:
-    - cron: "0 5 * * *"  # 05:00 UTC dagligen ≈ 07:00 i Sverige under sommartid (CEST)
+    - cron: "0 5 * * *"   # 07:00 SE (05:00 UTC sommartid)
   workflow_dispatch:
 
 permissions:
@@ -28,12 +28,16 @@ jobs:
 
       - name: Run adtraction_stats.py
         run: python adtraction_stats.py
+        continue-on-error: true
 
       - name: Run fractal_headset.py
         run: python fractal_headset.py
+        continue-on-error: true
 
       - name: Run fractal_refine.py
         run: python fractal_refine.py
+        continue-on-error: true
 
       - name: Run soder_stats.py
         run: python soder_stats.py
+        continue-on-error: true

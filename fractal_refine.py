@@ -1,116 +1,110 @@
-import re, time, random, datetime, os, unicodedata
-import requests
-from bs4 import BeautifulSoup
+import re, datetime, os, time
 from openpyxl import Workbook, load_workbook
+from playwright.sync_api import sync_playwright
 
-try:
-    import cloudscraper
-except Exception:
-    cloudscraper = None
-
-BASE_URL   = "https://www.newegg.com/Gaming-Chairs/SubCategory/ID-3628"
-PAGE_SIZE  = 96
-PAGES      = 1
-SKIP_SPONSORED = True
-XLSX_FILE  = "data.xlsx"
+BASE_URL  = "https://www.newegg.com/Gaming-Chairs/SubCategory/ID-3628"
+PAGE_SIZE = 96
+XLSX_FILE = "data.xlsx"
 SHEET_NAME = "FRCTL_chair"
 
+# Regex för varianter (titel + specs/primary color). Case-insensitive.
 PATTERNS = {
-    "fabric_dark": re.compile(
-        r"fractal\s+(?:design\s+)?refine.*?(fabric|woven).*?(dark|black|charcoal|noir|graphite|charcoal\s*gray|grey)",
-        re.I | re.S),
-    "fabric_light": re.compile(
-        r"fractal\s+(?:design\s+)?refine.*?(fabric|woven).*?(light|white|silver|light\s*gray|light\s*grey|grey|gray)",
-        re.I | re.S),
-    "mesh_dark": re.compile(
-        r"fractal\s+(?:design\s+)?refine.*?mesh.*?(dark|black|charcoal|noir|graphite)",
-        re.I | re.S),
-    "mesh_light": re.compile(
-        r"fractal\s+(?:design\s+)?refine.*?mesh.*?(light|white|silver|light\s*gray|light\s*grey|grey|gray)",
-        re.I | re.S),
-    "alcantara": re.compile(r"fractal\s+(?:design\s+)?refine.*?alcantara", re.I | re.S),
+    "fabric_dark":  re.compile(r"\bfractal(?:\s+design)?\b.*\brefine\b.*?(fabric|woven).*?(dark|black|charcoal|noir|graphite|charcoal\s*gray|grey)", re.I|re.S),
+    "fabric_light": re.compile(r"\bfractal(?:\s+design)?\b.*\brefine\b.*?(fabric|woven).*?(light|white|silver|light\s*gray|light\s*grey|grey|gray)", re.I|re.S),
+    "mesh_dark":    re.compile(r"\bfractal(?:\s+design)?\b.*\brefine\b.*?mesh.*?(dark|black|charcoal|noir|graphite)", re.I|re.S),
+    "mesh_light":   re.compile(r"\bfractal(?:\s+design)?\b.*\brefine\b.*?mesh.*?(light|white|silver|light\s*gray|light\s*grey|grey|gray)", re.I|re.S),
+    "alcantara":    re.compile(r"\bfractal(?:\s+design)?\b.*\brefine\b.*?alcantara", re.I|re.S),
 }
 
-HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                   "Chrome/126.0.0.0 Safari/537.36"),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Upgrade-Insecure-Requests": "1",
-    "Connection": "keep-alive",
-    "Referer": "https://www.newegg.com/",
-}
+def looks_sponsored_text(txt: str) -> bool:
+    t = txt.lower()
+    return ("sponsored" in t) or ("advertisement" in t)
 
-def looks_sponsored(tile):
-    if not SKIP_SPONSORED:
-        return False
-    txt = tile.get_text(" ", strip=True).lower()
-    return "sponsored" in txt or "advertisement" in txt
-
-def normalize_text(s: str) -> str:
-    s = unicodedata.normalize("NFKC", s)
-    return s.replace("®", " ").replace("™", " ")
-
-def parse_html(html):
-    soup = BeautifulSoup(html, "html.parser")
-    tiles = soup.select("div.item-cell") or soup.select("div.item-container, div.item-grid > div")
+def fetch_items_with_playwright():
+    """Returnerar lista [{'title':..., 'fulltext':...}] i visningsordning (skippar Sponsored)."""
+    params = f"?Order=3&Page=1&PageSize={PAGE_SIZE}"
+    url = BASE_URL + params
     items = []
-    for idx_on_page, tile in enumerate(tiles, start=1):
-        if looks_sponsored(tile):
-            continue
-        a = tile.select_one("a.item-title")
-        title = a.get_text(strip=True) if a else ""
-        spec = tile.get_text(" ", strip=True)
-        fulltext = normalize_text((title + " " + spec)).lower()
-        items.append({"idx_on_page": idx_on_page, "title": title, "fulltext": fulltext})
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/126.0.0.0 Safari/537.36"),
+            locale="en-US",
+        )
+        page = context.new_page()
+
+        # Cookie warm-up
+        page.goto("https://www.newegg.com/", wait_until="domcontentloaded", timeout=60000)
+        time.sleep(0.4)
+
+        # Gå till listan
+        page.goto(url, wait_until="networkidle", timeout=90000)
+
+        # Vänta in kort
+        for _ in range(8):
+            if page.locator("div.item-cell a.item-title").first.is_visible():
+                break
+            time.sleep(0.6)
+
+        tiles = page.locator("div.item-cell")
+        if tiles.count() == 0:
+            tiles = page.locator("div.item-container, div.item-grid > div")
+
+        count = tiles.count()
+        for i in range(count):
+            t = tiles.nth(i)
+            # Hämta all text i kortet (titel + specs, inkl. 'Primary Color')
+            try:
+                fulltext = t.inner_text().replace("®", " ").replace("™", " ")
+            except Exception:
+                continue
+            if looks_sponsored_text(fulltext):
+                continue
+
+            title = ""
+            try:
+                if t.locator("a.item-title").count():
+                    title = t.locator("a.item-title").inner_text().strip()
+            except Exception:
+                pass
+
+            if title or fulltext:
+                items.append({
+                    "title": title,
+                    "fulltext": (title + " " + fulltext).lower()
+                })
+
+        context.close()
+        browser.close()
+
     return items
 
-def fetch_html_with_requests(page=1):
-    sess = requests.Session()
-    sess.headers.update(HEADERS)
-    try:
-        sess.get("https://www.newegg.com/", timeout=30)
-        time.sleep(0.4 + random.random()*0.6)
-    except Exception:
-        pass
-    params = {"Order": "3", "Page": str(page), "PageSize": str(PAGE_SIZE)}
-    for attempt in range(3):
-        r = sess.get(BASE_URL, params=params, timeout=45)
-        if r.status_code == 200 and "captcha" not in r.text.lower():
-            return r.text
-        time.sleep(1.0 + attempt*0.8)
-    if cloudscraper is not None:
-        scraper = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "windows", "mobile": False})
-        r = scraper.get(BASE_URL, params=params, headers=HEADERS, timeout=60)
-        r.raise_for_status()
-        return r.text
-    r.raise_for_status()
-    return ""
-
-def find_positions():
-    positions = {k: None for k in PATTERNS}
-    for page in range(1, PAGES + 1):
-        html = fetch_html_with_requests(page=page)
-        items = parse_html(html)
-        for visible_idx, it in enumerate(items, start=1):
-            global_pos = (page - 1) * PAGE_SIZE + visible_idx
-            txt = it["fulltext"]
-            if "fractal" not in txt or "refine" not in txt:
-                continue
-            for key, pattern in PATTERNS.items():
-                if positions[key] is None and pattern.search(txt):
-                    positions[key] = global_pos
+def find_positions(items):
+    """Returnerar positions-dict för våra 5 varianter (1-baserat index i visningsordning)."""
+    positions = {k: None for k in PATTERNS.keys()}
+    for idx, it in enumerate(items, start=1):
+        txt = it["fulltext"]
+        if ("fractal" not in txt) or ("refine" not in txt):
+            continue
+        for key, pat in PATTERNS.items():
+            if positions[key] is None and pat.search(txt):
+                positions[key] = idx
+        if all(v is not None for v in positions.values()):
+            break
     return positions
 
-def save_to_excel(date_time_str, store, pos):
+def save_to_excel(datetime_str, store, pos):
     if os.path.exists(XLSX_FILE):
         wb = load_workbook(XLSX_FILE)
     else:
         wb = Workbook()
         if "Sheet" in wb.sheetnames:
             wb.remove(wb["Sheet"])
+
     if SHEET_NAME not in wb.sheetnames:
         ws = wb.create_sheet(SHEET_NAME)
         ws.append([
@@ -121,8 +115,9 @@ def save_to_excel(date_time_str, store, pos):
         ])
     else:
         ws = wb[SHEET_NAME]
+
     ws.append([
-        date_time_str, store,
+        datetime_str, store,
         pos["fabric_dark"], pos["fabric_light"],
         pos["mesh_dark"], pos["mesh_light"],
         pos["alcantara"]
@@ -130,10 +125,10 @@ def save_to_excel(date_time_str, store, pos):
     wb.save(XLSX_FILE)
 
 if __name__ == "__main__":
-    # YYYY-MM-DD HH:MM
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     store = "Newegg"
-    pos = find_positions()
+    items = fetch_items_with_playwright()
+    pos = find_positions(items)
     save_to_excel(now_str, store, pos)
 
     x = pos["fabric_dark"]  if pos["fabric_dark"]  is not None else "-"
