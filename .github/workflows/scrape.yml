@@ -29,8 +29,8 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           # Om du använder Playwright i något script:
-          # python -m playwright install chromium
-          # python -m playwright install-deps || true
+          python -m playwright install chromium
+          python -m playwright install-deps || true
 
       # Kör alla scripts i ett block: fortsätt även om något failar och samla exit-koder
       - name: Run all scripts (never stop on error)
