@@ -2,11 +2,11 @@ name: scrape-daily
 
 on:
   schedule:
-    - cron: "0 5 * * *"   # 07:00 SE (05:00 UTC sommartid)
+    - cron: "0 5 * * *"   # 07:00 SE (GitHub Actions kör i UTC)
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write  # krävs för att pusha med GITHUB_TOKEN
 
 jobs:
   run-scripts:
@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,19 +28,64 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Om du använder Playwright i något script:
+          # python -m playwright install chromium
+          # python -m playwright install-deps || true
 
-      - name: Run adtraction_stats.py
-        run: python adtraction_stats.py
-        continue-on-error: true
+      # Kör alla scripts i ett block: fortsätt även om något failar och samla exit-koder
+      - name: Run all scripts (never stop on error)
+        run: |
+          set +e
+          declare -A rc
 
-      - name: Run fractal_headset.py
-        run: python fractal_headset.py
-        continue-on-error: true
+          echo "=== Running adtraction_stats.py ==="
+          python adtraction_stats.py; rc[adtraction_stats]=$?
 
-      - name: Run fractal_refine.py
-        run: python fractal_refine.py
-        continue-on-error: true
+          echo "=== Running fractal_headset.py ==="
+          python fractal_headset.py; rc[fractal_headset]=$?
 
-      - name: Run soder_stats.py
-        run: python soder_stats.py
-        continue-on-error: true
+          echo "=== Running fractal_refine.py ==="
+          python fractal_refine.py; rc[fractal_refine]=$?
+
+          echo "=== Running soder_stats.py ==="
+          python soder_stats.py; rc[soder_stats]=$?
+
+          # Skriv en enkel CSV + summering
+          printf "script,status\n" > run_status.csv
+          for k in "${!rc[@]}"; do
+            if [ "${rc[$k]}" -eq 0 ]; then st="OK"; else st="FAIL(${rc[$k]})"; fi
+            printf "%s,%s\n" "$k" "$st" >> run_status.csv
+          done
+
+          {
+            echo "## Daglig scraping – summering"
+            echo ""
+            echo "| Script | Status |"
+            echo "|-------:|:-------|"
+            for k in "${!rc[@]}"; do
+              if [ "${rc[$k]}" -eq 0 ]; then st="✅ OK"; else st="❌ FAIL (${rc[$k]})"; fi
+              echo "| \`$k\` | $st |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Avsluta alltid med success så att nästa steg körs
+          exit 0
+
+      # Commit & push körs även om något ovan failade
+      - name: Commit & push updated files (if any)
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Lägg till Excel + körningslogg
+          git add data.xlsx run_status.csv || true
+
+          # Skippa commit om inget ändrats
+          if git diff --cached --quiet; then
+            echo "Inga ändringar att committa."
+            exit 0
+          fi
+
+          git commit -m "chore: update data.xlsx and run log [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME:-main}
