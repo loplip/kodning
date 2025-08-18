@@ -115,7 +115,7 @@ def run_category(base_url: str, sheet_name: str):
 
 def append_stats_row(results_by_label: dict):
     # results_by_label: "Fiskedrag" -> (share, score) osv
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
     sheet = "SODER_stats"
     header = [
         "datum",
