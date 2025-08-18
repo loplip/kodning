@@ -99,7 +99,7 @@ def run_category(base_url: str, sheet_name: str):
     own_count = len(placements)
     share = round(own_count / total, 4) if total else 0.0
     score = sum((total + 1 - p) for p in placements)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
 
     # Rad + spara till kategoriflik
     header = ["datum","antal_produkter","antal_egna","andel_egna","poängsumma"] + OWN_BRANDS_CANON + ["placeringar"]
