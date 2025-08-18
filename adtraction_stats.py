@@ -83,8 +83,7 @@ def main():
         print("Rad för angiven tidsstämpel finns redan – hoppar över.")
     else:
         d, conv, brands = added
-        print(f"Lade till:\nDatum\t\tKonverteringar\tVarumärken\n{d}\t{conv}\t{brands}")
-    print(f"Filen: {OUT_PATH.resolve()}")
+        print(f"\nDatum\t\tKonverteringar\tVarumärken\n{d}\t{conv}\t{brands}")
 
 if __name__ == "__main__":
     try:
