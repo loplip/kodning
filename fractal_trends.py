@@ -4,7 +4,7 @@
 Google Trends månadsvis (2016-01-01 -> idag) i batchar (4 termer + referens).
 Normaliserar batchar via referensen.
 
-Sparar till data.xlsx -> flik "Fractal_trends" (ersätter innehåll).
+Sparar till data_monthly.xlsx -> flik "Fractal_trends" (ersätter innehåll).
 Excel heltal. Extra kolumner (SUMMA + YoY %):
 Total | Total Chassin | Total Övrigt | % Total | % Chassin | % Övrigt
 
@@ -136,8 +136,6 @@ def main():
         print(f"Hämtar batch {i}: {kw_list}")
         gdf = fetch_group(pytrends, kw_list)
 
-        # INGA CSV-FILER SKAPAS
-
         if combined is None:
             combined = gdf.copy()
             base_ref_series = combined[REFERENCE].copy()
@@ -163,28 +161,28 @@ def main():
     # Total = summa alla kolumner (inkl. referensen)
     total_all = combined.sum(axis=1)
 
-    # Total Övrigt = exkludera Refine & Scape
-    excl_cols = [c for c in combined.columns if c not in ["Fractal Refine", "Fractal Scape"]]
-    total_excl = combined[excl_cols].sum(axis=1) if excl_cols else pd.Series(index=combined.index, dtype=float)
+    # Total Övrigt = ENDAST Refine + Scape
+    ovr_cols = [c for c in ["Fractal Refine", "Fractal Scape"] if c in combined.columns]
+    total_ovrigt = combined[ovr_cols].sum(axis=1) if len(ovr_cols) >= 1 else pd.Series(index=combined.index, dtype=float)
 
-    # Total Chassin = endast Refine + Scape
-    rs_cols = [c for c in ["Fractal Refine", "Fractal Scape"] if c in combined.columns]
-    total_rs = combined[rs_cols].sum(axis=1) if len(rs_cols) == 2 else pd.Series(index=combined.index, dtype=float)
+    # Total Chassin = ALLA övriga (exkl. Refine & Scape)
+    chassin_cols = [c for c in combined.columns if c not in ["Fractal Refine", "Fractal Scape"]]
+    total_chassin = combined[chassin_cols].sum(axis=1) if chassin_cols else pd.Series(index=combined.index, dtype=float)
 
     # YoY på respektive summa (%)
-    yoy_total = yoy_percent(total_all).replace([np.inf, -np.inf], np.nan)
-    yoy_excl  = yoy_percent(total_excl).replace([np.inf, -np.inf], np.nan)
-    yoy_rs    = yoy_percent(total_rs).replace([np.inf, -np.inf], np.nan)
+    yoy_total    = yoy_percent(total_all).replace([np.inf, -np.inf], np.nan)
+    yoy_chassin  = yoy_percent(total_chassin).replace([np.inf, -np.inf], np.nan)
+    yoy_ovrigt   = yoy_percent(total_ovrigt).replace([np.inf, -np.inf], np.nan)
 
     # -------- Heltal utan decimaler --------
     combined_int = combined.round(0).astype("Int64")
     extras = pd.DataFrame({
         "Total":          total_all.round(0).astype("Int64"),
-        "Total Chassin":  total_excl.round(0).astype("Int64"),
-        "Total Övrigt":   total_rs.round(0).astype("Int64"),
+        "Total Chassin":  total_chassin.round(0).astype("Int64"),
+        "Total Övrigt":   total_ovrigt.round(0).astype("Int64"),
         "% Total":        yoy_total.round(0).astype("Int64"),
-        "% Chassin":      yoy_excl.round(0).astype("Int64"),
-        "% Övrigt":       yoy_rs.round(0).astype("Int64"),
+        "% Chassin":      yoy_chassin.round(0).astype("Int64"),
+        "% Övrigt":       yoy_ovrigt.round(0).astype("Int64"),
     }, index=combined.index)
 
     # Bygg utdata: Månad (YYYY-MM), sedan värden
@@ -194,8 +192,14 @@ def main():
     df_out = df_out.reset_index(drop=True)
 
     # -------- Spara ENDAST till samma xlsx & samma flik --------
-    mode = "a" if OUT_FILE.exists() else "w"
-    with pd.ExcelWriter(OUT_FILE, engine="openpyxl", mode=mode, if_sheet_exists="replace") as writer:
+    OUT_FILE.parent.mkdir(parents=True, exist_ok=True)  # om katalog saknas
+    writer_kwargs = dict(engine="openpyxl")
+    if OUT_FILE.exists():
+        writer_kwargs.update(mode="a", if_sheet_exists="replace")
+    else:
+        writer_kwargs.update(mode="w")  # if_sheet_exists får EJ sättas här
+
+    with pd.ExcelWriter(OUT_FILE, **writer_kwargs) as writer:
         df_out.to_excel(writer, sheet_name=SHEET_NAME, index=False)
 
     # Skriv ut de tre senaste månaderna för referensen
