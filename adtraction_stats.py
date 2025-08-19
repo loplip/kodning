@@ -45,45 +45,61 @@ def ensure_workbook(path: Path) -> Workbook:
         wb = Workbook()
         ws = wb.active
         ws.title = SHEET_NAME
-        ws.append(["datum", "konverteringar", "varumärken"])
+        ws.append(["Datum", "Konverteringar", "Varumärken", "Diff"])
     if SHEET_NAME not in wb.sheetnames:
         ws = wb.create_sheet(SHEET_NAME)
-        ws.append(["datum", "konverteringar", "varumärken"])
+        ws.append(["Datum", "Konverteringar", "Varumärken", "Diff"])
     return wb
 
 def append_row_xlsx(path: Path, row: dict):
     wb = ensure_workbook(path)
     ws = wb[SHEET_NAME]
-    datum_s = row["datum"]
+
+    # kolla om Datum redan finns
+    Datum_s = row["Datum"]
     for r in ws.iter_rows(min_row=2, values_only=True):
-        if r and r[0] == datum_s:
+        if r and r[0] == Datum_s:
             return None
-    ws.append([row["datum"], row["konverteringar"], row["varumärken"]])
+
+    # hämta förra radens Konverteringar
+    prev_conv = None
+    if ws.max_row > 1:
+        prev_row = ws[ws.max_row]   # sista raden
+        prev_conv = prev_row[1].value  # kolumn B (Konverteringar)
+
+    diff = None
+    if prev_conv is not None:
+        try:
+            diff = row["Konverteringar"] - int(prev_conv)
+        except Exception:
+            diff = None
+
+    ws.append([row["Datum"], row["Konverteringar"], row["Varumärken"], diff])
     wb.save(path)
-    return (row["datum"], row["konverteringar"], row["varumärken"])
+    return (row["Datum"], row["Konverteringar"], row["Varumärken"], diff)
 
 def main():
     html = fetch_html(URL)
     nums = parse_numbers(html)
 
-    # Alltid nuvarande datum och tid
     timestamp = datetime.datetime.now(TZ).replace(second=0, microsecond=0)
-    datum = timestamp.strftime("%Y-%m-%d %H:%M")
+    Datum = timestamp.strftime("%Y-%m-%d %H:%M")
 
     added = append_row_xlsx(
         OUT_PATH,
         {
-            "datum": datum,
-            "konverteringar": nums["conversions"],
-            "varumärken": nums["brands"],
+            "Datum": Datum,
+            "Konverteringar": nums["conversions"],
+            "Varumärken": nums["brands"],
         }
     )
 
     if added is None:
         print("Rad för angiven tidsstämpel finns redan – hoppar över.")
     else:
-        d, conv, brands = added
-        print(f"\nDatum\t\tKonverteringar\tVarumärken\n{d}\t{conv}\t{brands}")
+        d, conv, brands, diff = added
+        print(f"\nDatum\t\tKonverteringar\tVarumärken\tDiff")
+        print(f"{d}\t{conv}\t{brands}\t{diff if diff is not None else ''}")
 
 if __name__ == "__main__":
     try:

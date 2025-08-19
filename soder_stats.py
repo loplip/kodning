@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 from collections import defaultdict
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
+from zoneinfo import ZoneInfo
+TZ = ZoneInfo("Europe/Stockholm")
 
 # ---------- Inställningar ----------
 XLSX_PATH = "data.xlsx"
@@ -99,7 +101,7 @@ def run_category(base_url: str, sheet_name: str):
     own_count = len(placements)
     share = round(own_count / total, 4) if total else 0.0
     score = sum((total + 1 - p) for p in placements)
-    now = datetime.datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
+    now = datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
 
     # Rad + spara till kategoriflik
     header = ["datum","antal_produkter","antal_egna","andel_egna","poängsumma"] + OWN_BRANDS_CANON + ["placeringar"]
@@ -115,7 +117,7 @@ def run_category(base_url: str, sheet_name: str):
 
 def append_stats_row(results_by_label: dict):
     # results_by_label: "Fiskedrag" -> (share, score) osv
-    now = datetime.datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
+    now = datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
     sheet = "SODER_stats"
     header = [
         "datum",
