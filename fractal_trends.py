@@ -57,7 +57,7 @@ CAT = 0
 GPROP = "" # web search
 
 # Spara alltid till samma fil bredvid scriptet
-OUT_FILE = Path(__file__).with_name("data.xlsx")
+OUT_FILE = Path(__file__).with_name("data_monthly.xlsx")
 SHEET_NAME = "Fractal_trends"
 
 # -------------------------- Hjälpfunktioner --------------------------
