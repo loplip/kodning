@@ -1,5 +1,5 @@
 script,status
 soder_stats,OK
-fractal_refine,OK
+fractal_refine,FAIL(1)
 fractal_headset,FAIL(1)
 adtraction_stats,OK
