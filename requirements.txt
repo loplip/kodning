@@ -6,3 +6,4 @@ cloudscraper
 lxml
 playwright
 pytrends
+python-dotenv

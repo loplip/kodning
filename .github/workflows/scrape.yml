@@ -41,14 +41,17 @@ jobs:
           echo "=== Running adtraction_stats.py ==="
           python adtraction_stats.py; rc[adtraction_stats]=$?
 
+          echo "=== Running soder_stats.py ==="
+          python soder_stats.py; rc[soder_stats]=$?
+
+          echo "=== Running rugvista_aov.py ==="
+          python rugvista_aov.py; rc[rugvista_aov]=$?
+
           echo "=== Running fractal_headset.py ==="
           python fractal_headset.py; rc[fractal_headset]=$?
 
           echo "=== Running fractal_refine.py ==="
           python fractal_refine.py; rc[fractal_refine]=$?
-
-          echo "=== Running soder_stats.py ==="
-          python soder_stats.py; rc[soder_stats]=$?
 
           # Skriv en enkel CSV + summering
           printf "script,status\n" > run_status.csv
