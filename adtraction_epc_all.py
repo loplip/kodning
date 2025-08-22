@@ -7,17 +7,19 @@ from pathlib import Path
 import httpx
 from openpyxl import Workbook, load_workbook
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
-from playwright._impl._errors import TargetClosedError
 
-# ==== INLOGGNING ====
+# =========================
+# KONFIG
+# =========================
 EMAIL = "filip.helmroth@gmail.com"
 PASSWORD = "Hejsan123"
 
-# ==== FIL/FLIK ====
-XLSX = "data_epc.xlsx"
+XLSX = "data_epc_all.xlsx"
 SHEET = "EPC"
 
-# ==== LÄNDER ====
+HEADLESS = True
+SLOW_MO_MS = 1000
+
 ALL_COUNTRIES = [
     ("Sverige", 1, "SE", True),
     ("Danmark", 12, "DK", True),
@@ -32,9 +34,8 @@ ALL_COUNTRIES = [
     ("Polen", 34, "PL", True),
     ("Nederländerna", 32, "NL", True),
 ]
-INCLUDE_DISABLED_IN_COLUMNS = False  # lämna så här för att slippa extra kolumner just nu
+INCLUDE_DISABLED_IN_COLUMNS = False
 
-# ==== KATEGORIER (cId) ====
 CATEGORIES = [
     ("Finans", 1), ("Fordon", 2), ("Övrigt", 4), ("Hobby & presenter", 5),
     ("Hälsa & skönhet", 6), ("Hem & trädgård", 7), ("Försäkringar", 8),
@@ -43,47 +44,52 @@ CATEGORIES = [
     ("Onlinetjänster", 18), ("Elektronik", 3),
 ]
 
-# ==== Valuta/parsing ====
+# =========================
+# Hjälp: valuta/parsing
+# =========================
 CURRENCY_REGEX = re.compile(r"(?P<val>[-+]?\d+(?:[.,]\d+)?)\s*(?P<cur>[A-Z]{3}|kr|£|€|\$|₽|₺)", re.I)
-VALUTA_HINT = re.compile(r"(SEK|kr|EUR|GBP|USD|€|£|\$)", re.I)
 NO_DATA_RE = re.compile(r"\b(inga\s*data|ingen\s*data|no\s*data)\b", re.I)
-
 
 PROGRAMS_HOME = "https://secure.adtraction.com/partner/programs.htm"
 PROGRAMS_LIST = "https://secure.adtraction.com/partner/listadvertprograms.htm"
 
+KR_BY_CC = {"SE": "SEK", "DK": "DKK", "NO": "NOK"}
+
 def to_float(s: str):
     try:
-        return float(s.replace("\xa0", "").replace(" ", "").replace(",", "."))
+        return float(s.replace("\xa0", " ").replace("\u202f", " ").replace(" ", "").replace(",", "."))
     except Exception:
         return None
 
 async def sek_rates():
+    # behövs endast för Total (i SEK)
     url = "https://api.exchangerate.host/latest?base=SEK"
-    async with httpx.AsyncClient(timeout=20) as cl:
+    async with httpx.AsyncClient(timeout=25) as cl:
         r = await cl.get(url)
         r.raise_for_status()
         return r.json().get("rates", {})
 
-def to_sek(amount: float, currency: str, rates: dict) -> float | None:
+def to_sek(amount: float, currency: str, rates: dict, cc: str | None = None) -> float | None:
     cur = currency.upper()
-    symbol_map = {"€": "EUR", "$": "USD", "£": "GBP", "₽": "RUB", "₺": "TRY", "KR": "SEK"}
+    # symbol → ISO
+    symbol_map = {"€": "EUR", "$": "USD", "£": "GBP", "₽": "RUB", "₺": "TRY"}
     cur = symbol_map.get(cur, cur)
+    # "kr" → landets krona
+    if cur.lower() == "kr":
+        cur = KR_BY_CC.get((cc or "SE").upper(), "SEK")
     if cur == "SEK":
         return amount
     rate = rates.get(cur)
     if not rate:
         return None
-    return amount / rate  # rates are CUR per SEK
+    # rates är CUR per SEK → SEK = amount / rate
+    return amount / rate
 
 def parse_epc_cell(text: str):
-    if not text:
+    if not text or NO_DATA_RE.search(text):
         return None, None
-    # NYTT: filtrera bort "Inga data" direkt
-    if NO_DATA_RE.search(text):
-        return None, None
-
-    m = CURRENCY_REGEX.search(text.replace("\u00a0", " "))
+    text = text.replace("\u00a0", " ").replace("\u202f", " ")
+    m = CURRENCY_REGEX.search(text)
     if not m:
         return None, None
     val = to_float(m.group("val"))
@@ -92,75 +98,81 @@ def parse_epc_cell(text: str):
         return None, None
     return val, cur
 
-
-async def wait_for_table(page):
-    try:
-        await page.wait_for_selector("table#data tbody tr", timeout=15000)
-    except PWTimeout:
-        await page.wait_for_timeout(800)
-
-async def find_epc_in_row(row):
-    # EPC ligger i en högerställd cell med class visible-lg (se dina screenshots/DOM)
-    cells = row.locator("td.visible-lg[align='right']")
-    if await cells.count() == 0:
-        return None
-    # ta alltid första – det är EPC-kolumnen (Provision ligger inte align='right')
-    t = (await cells.first.inner_text()).strip()
-    return t or None
-
-
+# =========================
+# Skrapning
+# =========================
 async def scrape_category_country(page, cid_country: int, cid_category: int):
     """
-    Robust navigation:
-      1) programs.htm?cid=<land>  (sätta land i serversessionen)
-      2) listadvertprograms.htm?cId=<kategori> (direkt-navigering)
-      3) Om tabellen inte syns: gå tillbaka till 1) och försök 2) igen (en retry)
-    Returnerar list[(värde, valuta)] från ENBART EPC-kolumnen.
+    Sätt land → öppna kategorilistan → läs EPC via thead-index.
+    Om tabell saknas (inga annonsörer) returneras tom lista.
     """
-    async def load_category_once() -> bool:
-        # 1) sätt land
-        await page.goto(f"{PROGRAMS_HOME}?cid={cid_country}&asonly=false", wait_until="domcontentloaded")
-        # 2) gå till kategorilistan
+    results: list[tuple[float, str]] = []
+
+    # 1) Sätt landet i serversessionen
+    await page.goto(f"{PROGRAMS_HOME}?cid={cid_country}&asonly=false", wait_until="domcontentloaded")
+    try:
+        await page.wait_for_selector("body", timeout=8000)
+    except PWTimeout:
+        return results  # ge upp tyst
+
+    # 2) Gå till kategorilistan (utan cid – landet är satt)
+    async def open_list() -> bool:
         await page.goto(f"{PROGRAMS_LIST}?cId={cid_category}&asonly=false", wait_until="domcontentloaded")
         try:
-            await page.wait_for_selector("table#data tbody tr", timeout=12000)
+            await page.wait_for_selector("table#data", timeout=6000)
+            try:
+                await page.wait_for_selector("table#data thead th", timeout=4000)
+            except PWTimeout:
+                try:
+                    await page.wait_for_selector("table#data tbody tr", timeout=2000)
+                except PWTimeout:
+                    return True  # behandla som tom
             return True
         except PWTimeout:
             return False
 
-    # Försök 1
-    ok = await load_category_once()
-    # Fallback – ibland kräver servern att land-översikten precis föregår listan
+    ok = await open_list()
     if not ok:
-        ok = await load_category_once()
+        await page.goto(f"{PROGRAMS_HOME}?cid={cid_country}&asonly=false", wait_until="domcontentloaded")
+        ok = await open_list()
         if not ok:
-            return []
+            return results
 
-    results: list[tuple[float, str]] = []
+    # hitta EPC-kolumnen om headers finns; annars fallback
+    epc_idx = None
+    try:
+        headers = page.locator("table#data thead th")
+        hcount = await headers.count()
+        for i in range(hcount):
+            txt = (await headers.nth(i).inner_text()).strip().lower()
+            if txt == "epc":
+                epc_idx = i
+                break
+    except Exception:
+        pass
 
+    # paginera
     while True:
-        # rader på aktuell sida
         rows = page.locator("table#data tbody tr")
         n = await rows.count()
         if n == 0:
             break
 
-        for i in range(n):
-            row = rows.nth(i)
-            # EPC-kolumnen är högerställd och 'visible-lg'
-            epc_cell = row.locator("td.visible-lg[align='right']").first
-            if await epc_cell.count() == 0:
-                continue
-            epc_text = (await epc_cell.inner_text()).strip()
-            # Skippa "Inga data" / "Ingen data" / "No data"
-            if not epc_text or NO_DATA_RE.search(epc_text):
+        for r in range(n):
+            try:
+                if epc_idx is not None:
+                    epc_cell = rows.nth(r).locator(f"td:nth-child({epc_idx + 1})").first
+                else:
+                    epc_cell = rows.nth(r).locator("td.visible-lg[align='right']").first
+                if await epc_cell.count() == 0:
+                    continue
+                epc_text = (await epc_cell.inner_text()).strip()
+                v, cur = parse_epc_cell(epc_text)
+                if v is not None and cur is not None:
+                    results.append((v, cur))
+            except Exception:
                 continue
 
-            v, cur = parse_epc_cell(epc_text)
-            if v is not None and cur is not None:
-                results.append((v, cur))
-
-        # paginering
         next_btn = page.locator("a.paginate_button.next")
         if await next_btn.count() == 0:
             break
@@ -168,7 +180,7 @@ async def scrape_category_country(page, cid_country: int, cid_category: int):
         if cls and "disabled" in cls:
             break
         await next_btn.first.click()
-        await page.wait_for_timeout(400)  # låt DataTables uppdatera
+        await page.wait_for_timeout(400)
         try:
             await page.wait_for_selector("table#data tbody tr", timeout=8000)
         except PWTimeout:
@@ -176,12 +188,10 @@ async def scrape_category_country(page, cid_country: int, cid_category: int):
 
     return results
 
-
-
-
-# ==== Excel ====
+# =========================
+# Excel
+# =========================
 def build_columns(countries):
-    # Datum | Total | Total # | Finans (SE) | # | Fordon (SE) | # | ...
     cols = ["Datum", "Total", "Total #"]
     for _, _, cc, _ in countries:
         for cat_name, _ in CATEGORIES:
@@ -190,9 +200,6 @@ def build_columns(countries):
     return cols
 
 def ensure_sheet_and_new_row(columns: list[str]) -> tuple[int, list[str]]:
-    """Skapar/öppnar fil/blad, kompletterar ev. nya kolumner, och APPEND:ar en ny rad.
-       Returnerar (row_index, headers_list). Datum skrivs som YYYY-MM-DD HH:MM.
-    """
     p = Path(XLSX)
     if p.exists():
         wb = load_workbook(XLSX)
@@ -223,15 +230,12 @@ def ensure_sheet_and_new_row(columns: list[str]) -> tuple[int, list[str]]:
         return 2, columns
 
 def build_label_index(headers: list[str]) -> dict[str, tuple[int, int]]:
-    """Mappar 'Finans (SE)' -> (kolumn för värde, kolumn för '#').
-       Vi antar att '#'-kolumnen alltid ligger direkt efter respektive värdekolumn.
-    """
     idx = {}
     for i, name in enumerate(headers):
         if not name or name in ("Datum", "Total", "Total #", "#"):
             continue
         if i + 1 < len(headers) and headers[i + 1] == "#":
-            idx[name] = (i + 1, i + 2)  # 1-baserad indexering för openpyxl
+            idx[name] = (i + 1, i + 2)
     return idx
 
 def write_cell(row_idx: int, col_idx_1based: int, value):
@@ -240,7 +244,9 @@ def write_cell(row_idx: int, col_idx_1based: int, value):
     ws.cell(row=row_idx, column=col_idx_1based, value=value)
     wb.save(XLSX)
 
-# ==== Huvud ====
+# =========================
+# MAIN
+# =========================
 async def main():
     rates = await sek_rates()
 
@@ -254,21 +260,18 @@ async def main():
     total_col = headers.index("Total") + 1
     total_cnt_col = headers.index("Total #") + 1
 
-    total_values: list[float] = []
+    # Total i SEK – fylls EFTER hela loopen
+    total_values_sek: list[float] = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, slow_mo=3000)
+        browser = await p.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO_MS)
 
-        # Logga in EN gång och spara en "ren" bas-session (utan valt land)
+        # login → base_auth
         ctx_base = await browser.new_context()
         page_login = await ctx_base.new_page()
-        await page_login.goto("https://adtraction.com/se/login", wait_until="domcontentloaded")
-
-        # login enligt din screenshot (svenska placeholders)
-        # använd robusta selektorer som funkar oavsett språk:
-        email_locator = page_login.locator("#email, input[type='email'], input[name='email'], input[placeholder*='post' i]").first
-        pwd_locator   = page_login.locator("#password, input[type='password'], input[name='password'], input[placeholder*='lösen' i], input[placeholder*='pass' i]").first
-
+        await page_login.goto("https://adtraction.com/login", wait_until="domcontentloaded")
+        email_locator = page_login.locator("#email, input[type='email'], input[name='email'], input[placeholder*='mail' i], input[placeholder*='post' i]").first
+        pwd_locator   = page_login.locator("#password, input[type='password'], input[name='password'], input[placeholder*='pass' i], input[placeholder*='lösen' i]").first
         await email_locator.fill(EMAIL)
         await pwd_locator.fill(PASSWORD)
         await page_login.locator("button.btn.btn-primary[type=submit]").click()
@@ -276,48 +279,59 @@ async def main():
         await ctx_base.storage_state(path="base_auth.json")
         await ctx_base.close()
 
-        # Kör jobb sekventiellt (stabilt) – vill du ha parallellt: skapa flera tasks med nya contexts från base_auth
+        # land/kategori
         for country_name, country_id, cc, _ in enabled_countries:
             for cat_name, cat_id in CATEGORIES:
-                # nytt context (egen cookiejar) från base_auth → land sätts för just detta jobb
                 ctx = await browser.new_context(storage_state="base_auth.json")
                 page = await ctx.new_page()
+                label = f"{cat_name} ({cc})"
                 try:
                     raw = await scrape_category_country(page, country_id, cat_id)
 
-                    filtered = []
+                    # 1) Filter i lokal valuta
+                    filtered_local: list[tuple[float, str]] = []
                     for v, cur in raw:
-                        vsek = to_sek(v, cur, rates)
-                        if vsek is None:
-                            continue
-                        if 0.1 <= vsek <= 200:
-                            filtered.append(vsek)
+                        cur_u = cur.upper()
+                        if cur_u == "EUR":
+                            if 0.01 <= v <= 20:
+                                filtered_local.append((v, cur))
+                        else:
+                            if 0.1 <= v <= 200:
+                                filtered_local.append((v, cur))
 
-                    label = f"{cat_name} ({cc})"
-                    val_col, cnt_col = label_to_cols[label]
-
-                    if filtered:
-                        avg = mean(filtered)
-                        avg_str = f"{avg:.1f}".replace(".", ",")
-                        cnt_val = len(filtered)
+                    # 2) Lokal snitt (två decimaler)
+                    if filtered_local:
+                        avg_local = mean(v for v, _ in filtered_local)
+                        avg_str = f"{avg_local:.2f}".replace(".", ",")
+                        cnt_val = len(filtered_local)
                         print(f"{label}: {avg_str} ({cnt_val})")
                     else:
                         avg_str, cnt_val = "-", "-"
                         reason = "inga rader" if not raw else "alla filtrerade bort"
                         print(f"{label}: -  [{reason}]")
 
-                    # skriv löpande
+                    # skriv cellerna löpande
+                    val_col, cnt_col = label_to_cols[label]
                     write_cell(row_idx, val_col, avg_str)
                     write_cell(row_idx, cnt_col, cnt_val)
 
-                    # uppdatera Total löpande
-                    if filtered:
-                        total_values.extend(filtered)
-                        avg_total = f"{mean(total_values):.1f}".replace(".", ",")
-                        write_cell(row_idx, total_col, avg_total)
-                        write_cell(row_idx, total_cnt_col, len(total_values))
+                    # 3) Lägg till i Total-listan (i SEK) – först efter att lokalt filter passerats
+                    if filtered_local:
+                        for v, cur in filtered_local:
+                            v_sek = to_sek(v, cur, rates, cc=cc)
+                            if v_sek is not None:
+                                total_values_sek.append(v_sek)
                 finally:
                     await ctx.close()
+
+        # Skriv Total / Total # EN GÅNG – nu med ALLA länder & kategorier
+        if total_values_sek:
+            total_avg = f"{mean(total_values_sek):.2f}".replace(".", ",")
+            write_cell(row_idx, total_col, total_avg)
+            write_cell(row_idx, total_cnt_col, len(total_values_sek))
+        else:
+            write_cell(row_idx, total_col, "-")
+            write_cell(row_idx, total_cnt_col, "-")
 
         await browser.close()
 
