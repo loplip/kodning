@@ -47,6 +47,9 @@ jobs:
           echo "=== Running rugvista_aov.py ==="
           python rugvista_aov.py; rc[rugvista_aov]=$?
 
+          echo "=== Running adtraction_epc_finance.py ==="
+          python adtraction_epc_finance.py; rc[adtraction_epc_finance]=$?
+
           echo "=== Running fractal_headset.py ==="
           python fractal_headset.py; rc[fractal_headset]=$?
 
