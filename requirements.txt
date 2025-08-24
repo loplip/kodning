@@ -7,3 +7,4 @@ lxml
 playwright
 pytrends
 python-dotenv
+httpx

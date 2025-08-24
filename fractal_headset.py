@@ -10,8 +10,9 @@ except ImportError:
 
 XLSX_FILE = "data.xlsx"
 SHEET_NAME = "FRCTL_headset"
-HEADLESS = False
+HEADLESS = True
 SLOW_MO_MS = 1000
+STORE_NAME = "Newegg"  # <-- ny: skrivs i kolumn B
 
 # *** ENDAST kategorisidan, sorterad på Best Selling (Order=3) och 96 per sida
 CATEGORY_URL = "https://www.newegg.com/Gaming-Headsets/SubCategory/ID-3767?Order=3&PageSize=96"
@@ -98,22 +99,47 @@ def find_global_ranks(page, max_pages: int = 10) -> Dict[str, Optional[int]]:
             if all(v is not None for v in ranks.values()):
                 return ranks
 
-        # om listan blev kort (sista sidan), avbryt
         if len(items) < 10:
             break
     return ranks
 
+# --- Uppdaterad: matchar Excel-layouten i din bild ---
 def save_to_excel(datetime_str: str, dark_pos: Optional[int], light_pos: Optional[int]) -> None:
+    headers = ["Datum", "Butik", "Fractal Design Scape Dark", "Fractal Design Scape Light"]
+
     wb = load_workbook(XLSX_FILE) if os.path.exists(XLSX_FILE) else Workbook()
-    if "Sheet" in wb.sheetnames:
+
+    # Ta bort defaultbladet om det finns
+    if "Sheet" in wb.sheetnames and len(wb.sheetnames) == 1:
         wb.remove(wb["Sheet"])
+
+    # Skapa eller hämta arket
     if SHEET_NAME not in wb.sheetnames:
         ws = wb.create_sheet(SHEET_NAME)
-        ws.append(["Datum", "Scape Dark rank", "Scape Light rank"])
+        ws.append(headers)
     else:
         ws = wb[SHEET_NAME]
-    ws.append([datetime_str, dark_pos if dark_pos is not None else "-", light_pos if light_pos is not None else "-"])
+        # Säkerställ exakt headerordning/namn
+        existing = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+        if existing != headers:
+            # rensa och skriv om första raden
+            if ws.max_row == 1:
+                ws.delete_rows(1, 1)
+            else:
+                # infoga ny header överst utan att paja historik
+                ws.insert_rows(1)
+            ws.append(headers)
+
+    # Skriv rad: datum, butik, dark, light
+    row = [
+        datetime_str,
+        STORE_NAME,
+        int(dark_pos) if dark_pos is not None else None,
+        int(light_pos) if light_pos is not None else None,
+    ]
+    ws.append(row)
     wb.save(XLSX_FILE)
+# --- slut på Excel-del ---
 
 def main():
     tz = datetime.timezone(datetime.timedelta(hours=2))
@@ -123,8 +149,10 @@ def main():
         browser, ctx = build_browser_context(p)
         page = ctx.new_page()
         if stealth_sync is not None:
-            try: stealth_sync(page)
-            except Exception: pass
+            try:
+                stealth_sync(page)
+            except Exception:
+                pass
 
         # värm upp cookies
         try:
@@ -137,7 +165,10 @@ def main():
         ctx.close(); browser.close()
 
     save_to_excel(now_str, ranks["dark"], ranks["light"])
-    print(f"La till: {ranks['dark'] if ranks['dark'] else '-'} {ranks['light'] if ranks['light'] else '-'} i {SHEET_NAME}")
+    print(
+        f"La till: {ranks['dark'] if ranks['dark'] else '-'} "
+        f"{ranks['light'] if ranks['light'] else '-'} i {SHEET_NAME}"
+    )
 
 if __name__ == "__main__":
     main()

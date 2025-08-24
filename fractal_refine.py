@@ -11,7 +11,7 @@ except ImportError:
 
 XLSX_FILE = "data.xlsx"
 SHEET_NAME = "FRCTL_chair"
-HEADLESS = False
+HEADLESS = True
 SLOW_MO_MS = 1000
 
 # Kategorisidan: Gaming Chairs, Best Selling (Order=3), 96 per sida
