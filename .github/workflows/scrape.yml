@@ -2,7 +2,7 @@ name: scrape-daily
 
 on:
   schedule:
-    - cron: "0 5 * * *"   # 07:00 SE (GitHub Actions kör i UTC)
+    - cron: "0 4 * * *"   # 07:00 SE (GitHub Actions kör i UTC)
   workflow_dispatch:
 
 permissions:
@@ -51,7 +51,7 @@ jobs:
           python adtraction_epc_finance.py; rc[adtraction_epc_finance]=$?
 
           echo "=== Running fractal_headset.py ==="
-          python fractal_headset.py; rc[fractal_headset]=$?
+          python fractal_scape.py; rc[fractal_headset]=$?
 
           echo "=== Running fractal_refine.py ==="
           python fractal_refine.py; rc[fractal_refine]=$?
@@ -85,7 +85,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # Lägg till Excel + körningslogg
-          git add data.xlsx run_status.csv || true
+          git add data.xlsx data_epc_finance.xlsx || true
 
           # Skippa commit om inget ändrats
           if git diff --cached --quiet; then
