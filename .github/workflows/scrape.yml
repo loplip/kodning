@@ -32,35 +32,52 @@ jobs:
           python -m playwright install chromium
           python -m playwright install-deps || true
 
-      # Kör alla scripts i ett block: fortsätt även om något failar och samla exit-koder
-      - name: Run all scripts (never stop on error)
+      - name: Run all scripts (module mode; never stop on error)
         run: |
           set +e
           declare -A rc
 
-          echo "=== Running adtraction_stats.py ==="
-          python adtraction_stats.py; rc[adtraction_stats]=$?
+          echo "=== Running run_monthly.py ==="
+          python -u run_monthly.py; rc[run_monthly]=$?
 
-          echo "=== Running soder_stats.py ==="
-          python soder_stats.py; rc[soder_stats]=$?
+          echo "=== Running scripts/adtraction_epc_finance.py ==="
+          python -u -m scripts.adtraction_epc_finance; rc[adtraction_epc_finance]=$?
 
-          echo "=== Running rugvista_aov.py ==="
-          python rugvista_aov.py; rc[rugvista_aov]=$?
+          echo "=== Running scripts/adtraction_epc_all.py ==="
+          python -u -m scripts.adtraction_epc_all; rc[adtraction_epc_all]=$?
 
-          echo "=== Running adtraction_epc_finance.py ==="
-          python adtraction_epc_finance.py; rc[adtraction_epc_finance]=$?
+          echo "=== Running scripts/adtraction_stats.py ==="
+          python -u -m scripts.adtraction_stats; rc[adtraction_stats]=$?
 
-          echo "=== Running fractal_headset.py ==="
-          python fractal_scape.py; rc[fractal_headset]=$?
+          echo "=== Running scripts/fractal_refine.py ==="
+          python -u -m scripts.fractal_refine; rc[fractal_refine]=$?
 
-          echo "=== Running fractal_refine.py ==="
-          python fractal_refine.py; rc[fractal_refine]=$?
+          echo "=== Running scripts/fractal_scape.py ==="
+          python -u -m scripts.fractal_scape; rc[fractal_scape]=$?
 
-          # Skriv en enkel CSV + summering
-          printf "script,status\n" > run_status.csv
+          echo "=== Running scripts/fractal_headset_inet.py ==="
+          python -u -m scripts.fractal_headset_inet; rc[fractal_headset_inet]=$?
+
+          echo "=== Running scripts/fractal_trends.py ==="
+          python -u -m scripts.fractal_trends; rc[fractal_trends]=$?
+
+          echo "=== Running scripts/rugvista_aov.py ==="
+          python -u -m scripts.rugvista_aov; rc[rugvista_aov]=$?
+
+          echo "=== Running scripts/rugvista_trends.py ==="
+          python -u -m scripts.rugvista_trends; rc[rugvista_trends]=$?
+
+          echo "=== Running scripts/soder_stats.py ==="
+          python -u -m scripts.soder_stats; rc[soder_stats]=$?
+
+          echo "=== Running scripts/soder_trends.py ==="
+          python -u -m scripts.soder_trends; rc[soder_trends]=$?
+
+          mkdir -p history
+          printf "script,status\n" > history/run_status.csv
           for k in "${!rc[@]}"; do
             if [ "${rc[$k]}" -eq 0 ]; then st="OK"; else st="FAIL(${rc[$k]})"; fi
-            printf "%s,%s\n" "$k" "$st" >> run_status.csv
+            printf "%s,%s\n" "$k" "$st" >> history/run_status.csv
           done
 
           {
@@ -74,24 +91,32 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Avsluta alltid med success så att nästa steg körs
           exit 0
 
-      # Commit & push körs även om något ovan failade
+      # ⬇️ NYTT: backa upp ENDAST ändrade/nya xlsx i data/
+      - name: Backup updated XLSX files to history
+        if: always()
+        run: |
+          mkdir -p history
+          TODAY=$(date +%Y-%m-%d)
+          # Ändrade (tracked) filer sedan HEAD
+          MODIFIED=$(git diff --name-only HEAD -- data/*.xlsx || true)
+          # Nya (untracked) filer
+          NEW=$(git ls-files --others --exclude-standard -- data/*.xlsx || true)
+          for f in $MODIFIED $NEW; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            dest="history/backup_${TODAY}_$base"
+            cp "$f" "$dest"
+            echo "Backup: $f -> $dest"
+          done
+
       - name: Commit & push updated files (if any)
         if: always()
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Lägg till Excel + körningslogg
-          git add data.xlsx data_epc_finance.xlsx || true
-
-          # Skippa commit om inget ändrats
-          if git diff --cached --quiet; then
-            echo "Inga ändringar att committa."
-            exit 0
-          fi
-
-          git commit -m "chore: update data.xlsx and run log [skip ci]"
-          git push origin HEAD:${GITHUB_REF_NAME:-main}
+          # Lägg till Excel i data/, run-logg och backuper
+          git add data/*.xlsx || true
+          git add history/*.csv || t*

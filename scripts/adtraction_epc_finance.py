@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 EMAIL = "filip.helmroth@gmail.com"
 PASSWORD = "Hejsan123"
 
-XLSX = "data_epc_finance.xlsx"
+XLSX = DATA_DIR / "data_epc_finance.xlsx"
 SHEET = "EPC"
 
 HEADLESS = True

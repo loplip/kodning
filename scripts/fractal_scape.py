@@ -2,6 +2,8 @@ import os, re, time, random, datetime
 from typing import List, Dict, Optional
 from openpyxl import Workbook, load_workbook
 from playwright.sync_api import sync_playwright
+from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+
 
 try:
     from playwright_stealth import stealth_sync  # type: ignore

@@ -2,14 +2,13 @@
 from __future__ import annotations
 import sys, re, datetime
 from zoneinfo import ZoneInfo
-from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from openpyxl import Workbook, load_workbook
 
 URL = "https://adtraction.com/se/om-adtraction/"
 SHEET_NAME = "ADTR_conversions"
-OUT_PATH = Path("data.xlsx")
+OUT_PATH = DATA_DIR / "data.xlsx"
 TZ = ZoneInfo("Europe/Stockholm")
 
 LABELS = {

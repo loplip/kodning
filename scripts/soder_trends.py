@@ -10,8 +10,9 @@ Lägger till YoY-% för respektive kolumn.
 """
 from __future__ import annotations
 import time
-from pathlib import Path
 from datetime import date
+from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+
 
 import pandas as pd
 pd.set_option('future.no_silent_downcasting', True)
@@ -28,7 +29,7 @@ TZ = 0     # UTC
 CAT = 0
 GPROP = ""  # web search
 
-OUT_FILE = Path(__file__).with_name("data_monthly.xlsx")
+OUT_FILE = DATA_DIR / "data_monthly.xlsx"
 SHEET_NAME = "soder_trends"
 
 # ---------------------- Hjälpfunktioner ----------------------

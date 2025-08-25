@@ -7,6 +7,8 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+
 
 BASE = "https://www.rugvista.se/c/mattor/bastsaljare"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -113,7 +115,7 @@ def fetch_all_prices():
     return prices_all
 
 def append_to_excel(timestamp_str: str, aov_int: int,
-                    path="data.xlsx", sheet="rugvista_aov"):
+                    path = DATA_DIR / "data.xlsx", sheet="rugvista_aov"):
     p = Path(path)
     row = {"Datum": timestamp_str, "AOV": aov_int}
 
