@@ -3,6 +3,8 @@ from typing import List, Dict, Optional
 from openpyxl import Workbook, load_workbook
 from playwright.sync_api import sync_playwright
 from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+
 
 
 try:
@@ -10,9 +12,9 @@ try:
 except ImportError:
     stealth_sync = None  # type: ignore
 
-XLSX_FILE = "data.xlsx"
+XLSX_FILE = DATA_DIR / "data.xlsx"
 SHEET_NAME = "FRCTL_headset"
-HEADLESS = True
+HEADLESS = False
 SLOW_MO_MS = 1000
 STORE_NAME = "Newegg"  # <-- ny: skrivs i kolumn B
 
