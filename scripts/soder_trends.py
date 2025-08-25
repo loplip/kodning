@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Hämtar Google Trends månadsdata (2016-01-01 -> idag) för:
-  1) "sportfiskeprylar" (geo=SE)
-  2) "sportfishtackle"  (globalt)
 
-Sparar till data_monthly.xlsx -> flik "soder_trends" (ersätter innehåll om den finns).
-Lägger till YoY-% för respektive kolumn.
-"""
 from __future__ import annotations
-import time
+import time, sys
 from datetime import date
-from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts.common.paths import DATA_DIR
 
 
 import pandas as pd

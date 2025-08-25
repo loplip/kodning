@@ -1,4 +1,4 @@
-import os, re, unicodedata, requests
+import os, re, unicodedata, requests, sys
 from bs4 import BeautifulSoup
 from collections import defaultdict
 from datetime import datetime
@@ -6,8 +6,15 @@ from openpyxl import Workbook, load_workbook
 from zoneinfo import ZoneInfo
 TZ = ZoneInfo("Europe/Stockholm")
 
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts.common.paths import DATA_DIR
+
+
 # ---------- Inställningar ----------
-XLSX_PATH = "data.xlsx"
+XLSX_PATH = DATA_DIR / "data.xlsx"
 PAGES = [1, 2]
 CATEGORIES = [
     ("https://www.sportfiskeprylar.se/sv/fiskedrag",         "SODER_rank_fiskedrag",   "Fiskedrag"),

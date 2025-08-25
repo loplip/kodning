@@ -1,13 +1,17 @@
 # rugvista_aov.py
 from datetime import datetime
-import re
+import re, sys
 import time
-from pathlib import Path
 
 import pandas as pd
 from openpyxl import load_workbook
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts.common.paths import DATA_DIR
 
 
 BASE = "https://www.rugvista.se/c/mattor/bastsaljare"

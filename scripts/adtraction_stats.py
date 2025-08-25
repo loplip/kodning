@@ -6,6 +6,14 @@ import requests
 from bs4 import BeautifulSoup
 from openpyxl import Workbook, load_workbook
 
+
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts.common.paths import DATA_DIR
+
+
 URL = "https://adtraction.com/se/om-adtraction/"
 SHEET_NAME = "ADTR_conversions"
 OUT_PATH = DATA_DIR / "data.xlsx"

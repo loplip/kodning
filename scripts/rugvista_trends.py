@@ -9,11 +9,17 @@ Alla värden heltal. Extra kolumn: % YoY rugvista
 """
 
 from __future__ import annotations
-import time
-from pathlib import Path
+import time, sys
 from datetime import date
 import numpy as np
 import pandas as pd
+
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts.common.paths import DATA_DIR
+
 pd.set_option('future.no_silent_downcasting', True)
 
 from pytrends.request import TrendReq
@@ -31,7 +37,7 @@ GEO = ""   # worldwide
 CAT = 0
 GPROP = "" # web search
 
-OUT_FILE = Path(__file__).with_name("data_monthly.xlsx")
+OUT_FILE = DATA_DIR / "data_monthly.xlsx"
 SHEET_NAME = "rugvista_trends"
 
 # ------------------ Hjälpfunktioner ------------------

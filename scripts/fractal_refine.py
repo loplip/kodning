@@ -1,10 +1,14 @@
 # refine.py
-import os, re, time, random, datetime
+import os, sys, re, time, random, datetime
 from typing import List, Dict, Optional
 from openpyxl import Workbook, load_workbook
 from playwright.sync_api import sync_playwright
-from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
 
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts.common.paths import DATA_DIR
 
 try:
     from playwright_stealth import stealth_sync  # type: ignore

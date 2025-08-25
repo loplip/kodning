@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Google Trends månadsvis (2016-01-01 -> idag) i batchar (4 termer + referens).
-Normaliserar batchar via referensen.
-
-Sparar till data_monthly.xlsx -> flik "Fractal_trends" (ersätter innehåll).
-Excel heltal. Extra kolumner (SUMMA + YoY %):
-Total | Total Chassin | Total Övrigt | % Total | % Chassin | % Övrigt
-
-Skriver även ut de tre senaste månaderna för Fractal North i terminalen.
-"""
 
 from __future__ import annotations
-import time
-from pathlib import Path
+import time, sys
 from datetime import date
 from typing import List
 
@@ -22,6 +11,13 @@ import pandas as pd
 pd.set_option('future.no_silent_downcasting', True)  # undvik FutureWarning i pytrends/pandas
 
 from pytrends.request import TrendReq
+
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts.common.paths import DATA_DIR
+
 
 # -------------------------- Konfiguration --------------------------
 
@@ -57,7 +53,7 @@ CAT = 0
 GPROP = "" # web search
 
 # Spara alltid till samma fil bredvid scriptet
-OUT_FILE = Path(__file__).with_name("data_monthly.xlsx")
+OUT_FILE = DATA_DIR / "data_monthly.xlsx"
 SHEET_NAME = "Fractal_trends"
 
 # -------------------------- Hjälpfunktioner --------------------------
