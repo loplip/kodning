@@ -7,6 +7,8 @@ from pathlib import Path
 import httpx
 from openpyxl import Workbook, load_workbook
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+from scripts.common.paths import DATA_DIR, HISTORY_DIR  # (HISTORY_DIR om du använder run_status)
+
 
 # =========================
 # KONFIG
