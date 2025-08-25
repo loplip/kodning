@@ -31,44 +31,39 @@ def parse_price(text: str):
     return int(digits) if digits.isdigit() else None
 
 def get_prices_on_page(page) -> list[int]:
+    # scrolla ned lite för att trigga lazy-loading
     for _ in range(3):
         page.mouse.wheel(0, 2000)
         time.sleep(0.3)
 
     js = r"""
     () => {
-    const cards = Array.from(
+      const cards = Array.from(
         document.querySelectorAll(
-        '#products-wrapper [class*="product-card"], #products-wrapper [data-test*="product"]'
+          '#products-wrapper [class*="product-card"], #products-wrapper [data-test*="product"]'
         )
-    );
-    const takeText = (el) =>
-        (el?.innerText || el?.textContent || '').trim();
-
-    const prices = [];
-    for (const card of cards) {
+      );
+      const takeText = (el) => (el?.innerText || el?.textContent || '').trim();
+      const prices = [];
+      for (const card of cards) {
         const candidates = [
-        ...card.querySelectorAll('[itemprop="price"]'),
-        ...card.querySelectorAll('[class*="font-semibold"]'),
-        ...card.querySelectorAll('[class*="price"]'),
-        ...card.querySelectorAll('[data-price]'),
+          ...card.querySelectorAll('[itemprop="price"]'),
+          ...card.querySelectorAll('[class*="font-semibold"]'),
+          ...card.querySelectorAll('[class*="price"]'),
+          ...card.querySelectorAll('[data-price]'),
         ];
         let picked = null;
-
         for (const el of candidates) {
-        const t = el.getAttribute?.('content') || el.getAttribute?.('data-price') || takeText(el);
-        if (t && /kr/i.test(t)) { picked = t; break; }
-        if (t && /^\d[\d\s\u00A0]*$/.test(t)) { picked = t; break; }
+          const t = el.getAttribute?.('content') || el.getAttribute?.('data-price') || takeText(el);
+          if (t && /kr/i.test(t)) { picked = t; break; }
+          if (t && /^\d[\d\s\u00A0]*$/.test(t)) { picked = t; break; }
         }
-        if (!picked) {
-        picked = takeText(card);
-        }
+        if (!picked) picked = takeText(card);
         prices.push(picked);
-    }
-    return prices;
+      }
+      return prices;
     }
     """
-
 
     raw = page.evaluate(js)
     prices = []
@@ -79,7 +74,9 @@ def get_prices_on_page(page) -> list[int]:
     return prices
 
 def fetch_all_prices():
+    """Returnerar (alla_priser, priser_sida1)"""
     prices_all = []
+    prices_page1 = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, slow_mo=3000)
         ctx = browser.new_context(user_agent=UA, locale="sv-SE")
@@ -93,7 +90,7 @@ def fetch_all_prices():
             except PWTimeout:
                 break
 
-            # Vänta in och klicka bort cookie-bannern (tyst om den inte finns)
+            # Acceptera cookies (tyst om ingen banner)
             try:
                 page.wait_for_selector('button:has-text("Acceptera alla cookies")', timeout=8000)
                 page.locator('button:has-text("Acceptera alla cookies")').click()
@@ -109,61 +106,84 @@ def fetch_all_prices():
             if len(prices) == 0:
                 break
 
+            if page_num == 1:
+                prices_page1 = prices[:]  # spara första sidan separat
             prices_all.extend(prices)
+
             page_num += 1
             if page_num > 50:
                 break
 
         browser.close()
 
-    return prices_all
+    return prices_all, prices_page1
 
-def append_to_excel(timestamp_str: str, aov_int: int,
+def append_to_excel(timestamp_str: str, aov_int: int, aov_top50_int: int,
                     path = DATA_DIR / "data.xlsx", sheet="rugvista_aov"):
     p = Path(path)
-    row = {"Datum": timestamp_str, "AOV": aov_int}
+    row = {"Datum": timestamp_str, "AOV": aov_int, "AOV Top-50": aov_top50_int}
 
+    # Ny fil
     if not p.exists():
-        pd.DataFrame([row]).to_excel(path, index=False, sheet_name=sheet)
+        pd.DataFrame([row], columns=["Datum", "AOV", "AOV Top-50"]).to_excel(path, index=False, sheet_name=sheet)
         return
 
     try:
         wb = load_workbook(path)
         if sheet in wb.sheetnames:
             ws = wb[sheet]
+            # Sätt rubriker om tomt ark
             if ws.max_row == 1 and ws["A1"].value is None:
-                ws["A1"].value, ws["B1"].value = "Datum", "AOV"
+                ws["A1"].value, ws["B1"].value, ws["C1"].value = "Datum", "AOV", "AOV Top-50"
                 next_row = 2
             else:
+                # Säkerställ att kolumnrubriker finns
+                if ws["A1"].value != "Datum": ws["A1"].value = "Datum"
+                if ws["B1"].value != "AOV": ws["B1"].value = "AOV"
+                if ws["C1"].value != "AOV Top-50": ws["C1"].value = "AOV Top-50"
                 next_row = ws.max_row + 1
             ws[f"A{next_row}"].value = timestamp_str
             ws[f"B{next_row}"].value = aov_int
+            ws[f"C{next_row}"].value = aov_top50_int
             wb.save(path)
         else:
-            with pd.ExcelWriter(path, engine="openpyxl", mode="a",
-                                if_sheet_exists="new") as w:
-                pd.DataFrame([row]).to_excel(w, index=False, sheet_name=sheet)
+            with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="new") as w:
+                pd.DataFrame([row], columns=["Datum", "AOV", "AOV Top-50"]).to_excel(
+                    w, index=False, sheet_name=sheet
+                )
     except Exception:
+        # Fallback via pandas
         try:
             existing = pd.read_excel(path, sheet_name=sheet)
             df = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
         except Exception:
             df = pd.DataFrame([row])
-        with pd.ExcelWriter(path, engine="openpyxl", mode="a",
-                            if_sheet_exists="overlay") as w:
+        with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="overlay") as w:
             df.to_excel(w, index=False, sheet_name=sheet)
 
 def main():
-    prices = fetch_all_prices()
-    total = len(prices)
+    prices_all, prices_p1 = fetch_all_prices()
+    total = len(prices_all)
     if total == 0:
         print("Inga priser hittades – kontrollera cookiebannern eller API-lösningen.")
         return
-    aov = int(round(sum(prices) / total))
+
+    # AOV över alla priser (heltal, inga decimaler)
+    aov = int(round(sum(prices_all) / total))
+
+    # AOV Top-50: de 50 första på sida 1 (om färre än 50, använd det som finns)
+    top_slice = prices_p1[:50] if prices_p1 else []
+    if not top_slice:
+        print("Hittade inga priser på sida 1 – AOV Top-50 sätts till AOV.")
+        aov_top50 = aov
+    else:
+        aov_top50 = int(round(sum(top_slice) / len(top_slice)))
+
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-    append_to_excel(ts, aov)
+    append_to_excel(ts, aov, aov_top50)
+
     # Endast en snygg rad i terminalen
-    print(f"{ts} AOV={aov} på {total} priser")
+    print(f"{ts} AOV={aov} (alla {total} priser) | AOV Top-50={aov_top50} (sida 1: {len(top_slice)} priser)")
 
 if __name__ == "__main__":
     main()
