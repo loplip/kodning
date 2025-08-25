@@ -73,13 +73,6 @@ jobs:
           echo "=== Running scripts/soder_trends.py ==="
           python -u -m scripts.soder_trends; rc[soder_trends]=$?
 
-          mkdir -p history
-          printf "script,status\n" > history/run_status.csv
-          for k in "${!rc[@]}"; do
-            if [ "${rc[$k]}" -eq 0 ]; then st="OK"; else st="FAIL(${rc[$k]})"; fi
-            printf "%s,%s\n" "$k" "$st" >> history/run_status.csv
-          done
-
           {
             echo "## Daglig scraping – summering"
             echo ""
@@ -91,17 +84,16 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # Avsluta alltid med success så att efterföljande steg körs
           exit 0
 
-      # ⬇️ NYTT: backa upp ENDAST ändrade/nya xlsx i data/
+      # Backa upp ENDAST ändrade/nya xlsx i data/
       - name: Backup updated XLSX files to history
         if: always()
         run: |
           mkdir -p history
           TODAY=$(date +%Y-%m-%d)
-          # Ändrade (tracked) filer sedan HEAD
           MODIFIED=$(git diff --name-only HEAD -- data/*.xlsx || true)
-          # Nya (untracked) filer
           NEW=$(git ls-files --others --exclude-standard -- data/*.xlsx || true)
           for f in $MODIFIED $NEW; do
             [ -f "$f" ] || continue
@@ -117,6 +109,14 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Lägg till Excel i data/, run-logg och backuper
+          # Lägg till Excel i data/ samt backuper i history/
           git add data/*.xlsx || true
-          git add history/*.csv || t*
+          git add history/backup_*.xlsx || true
+
+          if git diff --cached --quiet; then
+            echo "Inga ändringar att committa."
+            exit 0
+          fi
+
+          git commit -m "chore: update data files + selective backups [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME:-main}
