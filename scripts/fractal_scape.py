@@ -16,7 +16,7 @@ except ImportError:
 
 XLSX_FILE = DATA_DIR / "data.xlsx"
 SHEET_NAME = "FRCTL_headset"
-HEADLESS = False
+HEADLESS = True
 SLOW_MO_MS = 1000
 STORE_NAME = "Newegg"  # <-- ny: skrivs i kolumn B
 

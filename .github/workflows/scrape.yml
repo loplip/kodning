@@ -37,6 +37,9 @@ jobs:
           set +e
           declare -A rc
 
+          echo "=== Running scripts/eql_find.py ==="
+          python -u -m scripts.eql_find; rc[eql_find]=$?
+
           echo "=== Running scripts/adtraction_stats.py ==="
           python -u -m scripts.adtraction_stats; rc[adtraction_stats]=$?
 

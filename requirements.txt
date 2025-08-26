@@ -1,10 +1,6 @@
 requests
-beautifulsoup4
-openpyxl
-tzdata
-cloudscraper
-lxml
-playwright
-pytrends
-python-dotenv
 httpx
+pandas
+openpyxl
+beautifulsoup4
+playwright
