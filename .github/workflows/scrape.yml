@@ -58,6 +58,10 @@ jobs:
           echo "=== Running scripts/fractal_scape.py ==="
           python -u -m scripts.fractal_scape; rc[fractal_scape]=$?          
 
+          # Skriv summering till:
+          #  - $GITHUB_STEP_SUMMARY (webb)
+          #  - konsolloggen (via tee; syns i appen)
+          #  - summary.md (artifact)
           {
             echo "## Daglig scraping – summering"
             echo ""
@@ -65,12 +69,21 @@ jobs:
             echo "|-------:|:-------|"
             for k in "${!rc[@]}"; do
               if [ "${rc[$k]}" -eq 0 ]; then st="✅ OK"; else st="❌ FAIL (${rc[$k]})"; fi
-              echo "| \`$k\` | $st |"
+              printf "| \`%s\` | %s |\n" "$k" "$st"
             done
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a summary.md >> "$GITHUB_STEP_SUMMARY"
 
           # Avsluta alltid med success så att efterföljande steg körs
           exit 0
+
+      - name: Upload run summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daglig-summering
+          path: summary.md
+          if-no-files-found: warn
+          retention-days: 14
 
       # Backa upp ENDAST ändrade/nya xlsx i data/
       - name: Backup updated XLSX files to history
