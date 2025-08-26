@@ -2,11 +2,12 @@ name: scrape-daily
 
 on:
   schedule:
-    - cron: "0 4 * * *"   # 07:00 SE (GitHub Actions kör i UTC)
+    # 05:00 UTC ≈ 06:00 (sommar) / 07:00 (vinter) i Sverige
+    - cron: "0 5 * * *"
   workflow_dispatch:
 
 permissions:
-  contents: write  # krävs för att pusha med GITHUB_TOKEN
+  contents: write
 
 jobs:
   run-scripts:
@@ -19,43 +20,52 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Set up Python
+      - name: Set up Python (with pip cache)
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            pw-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Om du använder Playwright i något script:
+          python -m pip install -r requirements.txt
           python -m playwright install chromium
-          python -m playwright install-deps || true
+          # INTE: python -m playwright install-deps
 
       - name: Run all scripts (module mode; never stop on error)
         run: |
           set +e
           declare -A rc
 
-          echo "=== eql_find ==="
+          echo " "
           python -u -m scripts.eql_find; rc[eql_find]=$?
 
-          echo "=== adtraction_stats ==="
+          echo " "
           python -u -m scripts.adtraction_stats; rc[adtraction_stats]=$?
 
-          echo "=== adtraction_epc_finance ==="
+          echo " "
           python -u -m scripts.adtraction_epc_finance; rc[adtraction_epc_finance]=$?
 
-          echo "=== rugvista_aov ==="
+          echo " "
           python -u -m scripts.rugvista_aov; rc[rugvista_aov]=$?
 
-          echo "=== soder_stats ==="
+          echo " "
           python -u -m scripts.soder_stats; rc[soder_stats]=$?
 
-          echo "=== fractal_refine ==="
+          echo " "
           python -u -m scripts.fractal_refine; rc[fractal_refine]=$?
 
-          echo "=== fractal_scape ==="
+          echo " "
           python -u -m scripts.fractal_scape; rc[fractal_scape]=$?
 
           {
@@ -69,10 +79,8 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Avsluta alltid med success så att efterföljande steg körs
           exit 0
 
-      # Backa upp ENDAST ändrade/nya xlsx i data/
       - name: Backup updated XLSX files to history
         if: always()
         run: |
@@ -93,15 +101,11 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Lägg till Excel i data/ samt backuper i history/
           git add data/*.xlsx || true
           git add history/backup_*.xlsx || true
-
           if git diff --cached --quiet; then
             echo "Inga ändringar att committa."
             exit 0
           fi
-
           git commit -m "chore: update data files + selective backups [skip ci]"
           git push origin HEAD:${GITHUB_REF_NAME:-main}
