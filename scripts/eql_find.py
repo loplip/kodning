@@ -341,7 +341,7 @@ def main(output_path: Optional[Path] = None) -> None:
     for _, r in new_rows.iterrows():
         name = r.get('Product Name', '')
         country = r.get('Country', '')
-        print(f"{name} har lagts till för {country}.")
+        print(f"EQL: {name} har lagts till för {country}.")
 
 if __name__ == '__main__':
     main()

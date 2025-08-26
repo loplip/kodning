@@ -174,8 +174,10 @@ def main():
         browser, ctx = build_browser_context(p)
         page = ctx.new_page()
         if stealth_sync is not None:
-            try: stealth_sync(page)
-            except Exception: pass
+            try:
+                stealth_sync(page)
+            except Exception:
+                pass
 
         try:
             page.goto("https://www.newegg.com/", wait_until="domcontentloaded", timeout=30000)
@@ -184,10 +186,19 @@ def main():
             pass
 
         ranks = find_global_ranks(page, max_pages=10)
-        ctx.close(); browser.close()
+        ctx.close()
+        browser.close()
 
     save_to_excel(now_str, ranks)
-    print("La till rad:", ranks, "i", SHEET_NAME)
+
+    # Endast slutlig utskrift i önskat format
+    print(
+        f"Fractal Refine: Fabric Dark = {ranks.get('fabric_dark', '-')}, "
+        f"Mesh Dark = {ranks.get('mesh_dark', '-')}, "
+        f"Fabric Light = {ranks.get('fabric_light', '-')}, "
+        f"Mesh Light = {ranks.get('mesh_light', '-')} & "
+        f"Alcantara = {ranks.get('alcantara', '-')}."
+    )
 
 if __name__ == "__main__":
     main()

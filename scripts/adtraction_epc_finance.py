@@ -269,6 +269,9 @@ async def main():
     # Total i SEK – fylls EFTER hela loopen
     total_values_sek: list[float] = []
 
+    # Samla EPC-värden för de länder som ska rapporteras i slututskriften
+    epc_values: dict[str, str] = {}
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO_MS)
 
@@ -310,23 +313,25 @@ async def main():
                         avg_local = mean(v for v, _ in filtered_local)
                         avg_str = f"{avg_local:.2f}".replace(".", ",")
                         cnt_val = len(filtered_local)
-                        print(f"{label}: {avg_str} ({cnt_val})")
                     else:
                         avg_str, cnt_val = "-", "-"
-                        reason = "inga rader" if not raw else "alla filtrerade bort"
-                        print(f"{label}: -  [{reason}]")
 
-                    # skriv cellerna löpande
+                    # skriv cellerna löpande (ingen utskrift till konsol)
                     val_col, cnt_col = label_to_cols[label]
                     write_cell(row_idx, val_col, avg_str)
                     write_cell(row_idx, cnt_col, cnt_val)
 
-                    # 3) Lägg till i Total-listan (i SEK) – först efter att lokalt filter passerats
+                    # 3) Lägg till i Total-listan (i SEK)
                     if filtered_local:
                         for v, cur in filtered_local:
                             v_sek = to_sek(v, cur, rates, cc=cc)
                             if v_sek is not None:
                                 total_values_sek.append(v_sek)
+
+                    # 4) Spara EPC-värde per land för slututskriften
+                    if cc in ("SE", "DK", "NO", "FI", "ES", "DE"):
+                        epc_values[cc] = avg_str
+
                 finally:
                     await ctx.close()
 
@@ -341,7 +346,12 @@ async def main():
 
         await browser.close()
 
-    print(f"Klar! Uppdaterade rad för {datetime.now().strftime('%Y-%m-%d %H:%M')} i '{XLSX}' (flik: {SHEET}).")
+    # Endast en slutlig rad skrivs ut
+    print(
+        f"Adtraction: SE = {epc_values.get('SE','-')}, DK = {epc_values.get('DK','-')}, "
+        f"NO = {epc_values.get('NO','-')}, FI = {epc_values.get('FI','-')}, "
+        f"ES = {epc_values.get('ES','-')} & DE = {epc_values.get('DE','-')}."
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

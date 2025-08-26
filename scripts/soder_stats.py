@@ -23,12 +23,10 @@ CATEGORIES = [
     ("https://www.sportfiskeprylar.se/sv/vaskor-boxar-forvaring", "SODER_rank_vaskor", "Vaskor"),
 ]
 
-# Egna varumärken (ANGLRS näst sist i kolumnerna)
 OWN_BRANDS_CANON = [
     "Söder Tackle", "Eastfield Lures", "Söder Sportfiske",
     "VATN", "Troutland", "ANGLRS"
 ]
-# Normaliserade varianter -> kanoniskt namn
 OWN_VARIANTS = {
     "soder tackle": "Söder Tackle", "söder tackle": "Söder Tackle",
     "eastfield lures": "Eastfield Lures", "eastfield": "Eastfield Lures",
@@ -51,7 +49,6 @@ def fetch_html(url: str) -> str:
     return r.text
 
 def extract_products(html: str):
-    """[(brand,title)] i visningsordning. Prefererar data-ls-brand från lipscore."""
     soup = BeautifulSoup(html, "html.parser")
     items = []
     for card in soup.select("div.PT_Wrapper.product, div.product, article.product, li.product"):
@@ -60,7 +57,8 @@ def extract_products(html: str):
         title = (ls.get("data-ls-product-name") or "").strip() if ls else ""
         if not title:
             a = card.select_one("div.product__title a, .product__title a, a.product--title")
-            if a: title = a.get_text(strip=True)
+            if a: 
+                title = a.get_text(strip=True)
         if brand or title:
             items.append((brand, title))
     return items
@@ -72,7 +70,7 @@ def open_or_create_wb():
     if os.path.exists(XLSX_PATH):
         return load_workbook(XLSX_PATH)
     wb = Workbook()
-    wb.remove(wb.active)  # ta bort default-fliken
+    wb.remove(wb.active)
     wb.save(XLSX_PATH)
     return wb
 
@@ -90,12 +88,10 @@ def append_row(sheet_name: str, header: list, row: list):
 
 # ---------- Körning per kategori + summering ----------
 def run_category(base_url: str, sheet_name: str):
-    # Hämta första två sidor
     products = []
     for p in PAGES:
         products.extend(extract_products(fetch_html(f"{base_url}?Sort=Populara&Page={p}")))
 
-    # Placeringar
     placements, per_brand = [], defaultdict(list)
     for idx, (brand, title) in enumerate(products, start=1):
         canon = map_to_canonical(brand)
@@ -103,27 +99,21 @@ def run_category(base_url: str, sheet_name: str):
             placements.append(idx)
             per_brand[canon].append(idx)
 
-    # Aggregerat
     total = len(products)
     own_count = len(placements)
     share = round(own_count / total, 4) if total else 0.0
     score = sum((total + 1 - p) for p in placements)
     now = datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
 
-    # Rad + spara till kategoriflik
     header = ["datum","antal_produkter","antal_egna","andel_egna","poängsumma"] + OWN_BRANDS_CANON + ["placeringar"]
     row = [now, total, own_count, share, score] \
           + [len(per_brand[b]) for b in OWN_BRANDS_CANON] \
           + [",".join(map(str, placements))]
     append_row(sheet_name, header, row)
 
-    # Terminal
-    print(f"La till {own_count} EMV av {total} i {sheet_name}")
-
-    return share, score  # till stats-fliken
+    return share, score
 
 def append_stats_row(results_by_label: dict):
-    # results_by_label: "Fiskedrag" -> (share, score) osv
     now = datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
     sheet = "SODER_stats"
     header = [
@@ -139,13 +129,23 @@ def append_stats_row(results_by_label: dict):
         row.extend([share, score])
     append_row(sheet, header, row)
 
+# ---------- Main ----------
 def main():
     stats = {}
     for base, sheet, label in CATEGORIES:
         share, score = run_category(base, sheet)
         stats[label] = (share, score)
-    # Summeringsrad i SODER_stats
     append_stats_row(stats)
+
+    # Endast slutlig utskrift med tusentalsmellanrum
+    def fmt(num: int) -> str:
+        return f"{num:,}".replace(",", " ")
+
+    x = fmt(stats.get("Fiskedrag", (0.0, 0))[1])
+    y = fmt(stats.get("Fiskerullar", (0.0, 0))[1])
+    z = fmt(stats.get("Fiskespon", (0.0, 0))[1])
+    w = fmt(stats.get("Vaskor", (0.0, 0))[1])
+    print(f"Söder: {x} i fiskedrag, {y} i fiskerullar, {z} i fiskespon & {w} i väskor.")
 
 if __name__ == "__main__":
     main()

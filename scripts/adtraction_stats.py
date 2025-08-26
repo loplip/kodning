@@ -105,8 +105,16 @@ def main():
         print("Rad för angiven tidsstämpel finns redan – hoppar över.")
     else:
         d, conv, brands, diff = added
-        print(f"\nDatum\t\tKonverteringar\tVarumärken\tDiff")
-        print(f"{d}\t{conv}\t{brands}\t{diff if diff is not None else ''}")
+
+        conv_fmt = f"{conv:,}".replace(",", " ")
+        brands_fmt = f"{brands:,}".replace(",", " ")
+        diff_fmt = f"{diff:,}".replace(",", " ") if diff is not None else None
+
+        if diff_fmt is not None:
+            print(f"Adtraction: {conv_fmt} konverteringar, {brands_fmt} annonsörer och en diff på {diff_fmt}.")
+        else:
+            print(f"Adtraction: {conv_fmt} konverteringar, {brands_fmt} annonsörer.")
+
 
 if __name__ == "__main__":
     try:

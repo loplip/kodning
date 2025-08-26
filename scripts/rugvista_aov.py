@@ -182,8 +182,13 @@ def main():
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     append_to_excel(ts, aov, aov_top50)
 
+    # formatering med tusentalsmellanrum
+    def fmt(n: int) -> str:
+        return f"{n:,}".replace(",", " ")
+
     # Endast en snygg rad i terminalen
-    print(f"{ts} AOV={aov} (alla {total} priser) | AOV Top-50={aov_top50} (sida 1: {len(top_slice)} priser)")
+    print(f"RugVista: AOV = {fmt(aov)} för alla och AOV Top-50 = {fmt(aov_top50)}.")
+
 
 if __name__ == "__main__":
     main()

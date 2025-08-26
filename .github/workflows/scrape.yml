@@ -37,31 +37,27 @@ jobs:
           set +e
           declare -A rc
 
-          echo "=== Running scripts/eql_find.py ==="
+          echo "=== eql_find ==="
           python -u -m scripts.eql_find; rc[eql_find]=$?
 
-          echo "=== Running scripts/adtraction_stats.py ==="
+          echo "=== adtraction_stats ==="
           python -u -m scripts.adtraction_stats; rc[adtraction_stats]=$?
 
-          echo "=== Running scripts/adtraction_epc_finance.py ==="
+          echo "=== adtraction_epc_finance ==="
           python -u -m scripts.adtraction_epc_finance; rc[adtraction_epc_finance]=$?
 
-          echo "=== Running scripts/rugvista_aov.py ==="
+          echo "=== rugvista_aov ==="
           python -u -m scripts.rugvista_aov; rc[rugvista_aov]=$?
 
-          echo "=== Running scripts/soder_stats.py ==="
+          echo "=== soder_stats ==="
           python -u -m scripts.soder_stats; rc[soder_stats]=$?
 
-          echo "=== Running scripts/fractal_refine.py ==="
+          echo "=== fractal_refine ==="
           python -u -m scripts.fractal_refine; rc[fractal_refine]=$?
 
-          echo "=== Running scripts/fractal_scape.py ==="
-          python -u -m scripts.fractal_scape; rc[fractal_scape]=$?          
+          echo "=== fractal_scape ==="
+          python -u -m scripts.fractal_scape; rc[fractal_scape]=$?
 
-          # Skriv summering till:
-          #  - $GITHUB_STEP_SUMMARY (webb)
-          #  - konsolloggen (via tee; syns i appen)
-          #  - summary.md (artifact)
           {
             echo "## Daglig scraping – summering"
             echo ""
@@ -69,21 +65,12 @@ jobs:
             echo "|-------:|:-------|"
             for k in "${!rc[@]}"; do
               if [ "${rc[$k]}" -eq 0 ]; then st="✅ OK"; else st="❌ FAIL (${rc[$k]})"; fi
-              printf "| \`%s\` | %s |\n" "$k" "$st"
+              echo "| \`$k\` | $st |"
             done
-          } | tee -a summary.md >> "$GITHUB_STEP_SUMMARY"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           # Avsluta alltid med success så att efterföljande steg körs
           exit 0
-
-      - name: Upload run summary artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: daglig-summering
-          path: summary.md
-          if-no-files-found: warn
-          retention-days: 14
 
       # Backa upp ENDAST ändrade/nya xlsx i data/
       - name: Backup updated XLSX files to history

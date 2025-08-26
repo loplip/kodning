@@ -172,8 +172,8 @@ def main():
 
     save_to_excel(now_str, ranks["dark"], ranks["light"])
     print(
-        f"La till: {ranks['dark'] if ranks['dark'] else '-'} "
-        f"{ranks['light'] if ranks['light'] else '-'} i {SHEET_NAME}"
+        f"Fractal Scape: Dark = {ranks.get('dark', '-')}"
+        f" & Light = {ranks.get('light', '-')}."
     )
 
 if __name__ == "__main__":
