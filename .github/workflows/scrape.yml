@@ -43,45 +43,71 @@ jobs:
           # INTE: python -m playwright install-deps
 
       - name: Run all scripts (module mode; never stop on error)
+        continue-on-error: true
+        shell: bash
         run: |
-          set +e
+          set -o pipefail
           declare -A rc
+          declare -A outputs
 
           echo " "
-          python -u -m scripts.eql_find; rc[eql_find]=$?
+          outputs[eql_find]="$(python -u -m scripts.eql_find 2>&1)"; rc[eql_find]=$?
+          echo "${outputs[eql_find]}"
 
           echo " "
-          python -u -m scripts.adtraction_stats; rc[adtraction_stats]=$?
+          outputs[adtraction_stats]="$(python -u -m scripts.adtraction_stats 2>&1)"; rc[adtraction_stats]=$?
+          echo "${outputs[adtraction_stats]}"
 
           echo " "
-          python -u -m scripts.adtraction_epc_finance; rc[adtraction_epc_finance]=$?
+          outputs[adtraction_epc_finance]="$(python -u -m scripts.adtraction_epc_finance 2>&1)"; rc[adtraction_epc_finance]=$?
+          echo "${outputs[adtraction_epc_finance]}"
 
           echo " "
-          python -u -m scripts.rugvista_aov; rc[rugvista_aov]=$?
+          outputs[rugvista_aov]="$(python -u -m scripts.rugvista_aov 2>&1)"; rc[rugvista_aov]=$?
+          echo "${outputs[rugvista_aov]}"
 
           echo " "
-          python -u -m scripts.soder_stats; rc[soder_stats]=$?
+          outputs[soder_stats]="$(python -u -m scripts.soder_stats 2>&1)"; rc[soder_stats]=$?
+          echo "${outputs[soder_stats]}"
 
           echo " "
-          python -u -m scripts.fractal_refine; rc[fractal_refine]=$?
+          outputs[fractal_refine]="$(python -u -m scripts.fractal_refine 2>&1)"; rc[fractal_refine]=$?
+          echo "${outputs[fractal_refine]}"
 
           echo " "
-          python -u -m scripts.fractal_scape; rc[fractal_scape]=$?
+          outputs[fractal_scape]="$(python -u -m scripts.fractal_scape 2>&1)"; rc[fractal_scape]=$?
+          echo "${outputs[fractal_scape]}"
 
           {
             echo "## Daglig scraping – summering"
             echo ""
-            echo "| Script | Status |"
-            echo "|-------:|:-------|"
-            for k in "${!rc[@]}"; do
-              if [ "${rc[$k]}" -eq 0 ]; then st="✅ OK"; else st="❌ FAIL (${rc[$k]})"; fi
-              echo "| \`$k\` | $st |"
+            echo "| Script | Status | Output |"
+            echo "|-------:|:-------|:-------|"
+
+            scripts=(
+              "eql_find"
+              "adtraction_stats"
+              "adtraction_epc_finance"
+              "rugvista_aov"
+              "soder_stats"
+              "fractal_refine"
+              "fractal_scape"
+            )
+
+            for k in "${scripts[@]}"; do
+              out="${outputs[$k]}"
+              # Escapa tabelltecken/nyrader för GitHub-markdown
+              out="${out//|/\\|}"
+              out="${out//$'\r'/}"           # ta bort CR om sådana finns
+              out="${out//$'\n'/<br/>}"
+              if [[ "${rc[$k]}" -eq 0 ]]; then st="✅ OK"; else st="❌ FAIL (${rc[$k]})"; fi
+              printf "| \`%s\` | %s | %s |\n" "$k" "$st" "$out"
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
-          exit 0
 
-      - name: Backup updated XLSX files to history
+
+      - name: Lägg till backup-filer i ./history
         if: always()
         run: |
           mkdir -p history
@@ -96,7 +122,7 @@ jobs:
             echo "Backup: $f -> $dest"
           done
 
-      - name: Commit & push updated files (if any)
+      - name: Commita & pusha uppdaterade filer
         if: always()
         run: |
           git config user.name  "github-actions[bot]"
