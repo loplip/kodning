@@ -78,6 +78,11 @@ jobs:
           outputs[fractal_scape]="$(python -u -m scripts.fractal_scape 2>&1)"; rc[fractal_scape]=$?
           echo "${outputs[fractal_scape]}"
 
+          echo " "
+          outputs[sitemap_fetch]="$(python -u -m scripts.sitemap_fetch 2>&1)"; rc[sitemap_fetch]=$?
+          echo "${outputs[sitemap_fetch]}"
+
+
           {
             echo "## Daglig scraping – summering"
             echo ""
@@ -92,6 +97,7 @@ jobs:
               "soder_stats"
               "fractal_refine"
               "fractal_scape"
+              "sitemap_fetch"
             )
 
             for k in "${scripts[@]}"; do

@@ -17,7 +17,7 @@ except ImportError:
 
 XLSX_FILE = DATA_DIR / "data.xlsx"
 SHEET_NAME = "FRCTL_chair"
-HEADLESS = True
+HEADLESS = False
 SLOW_MO_MS = 1000
 
 # Kategorisidan: Gaming Chairs, Best Selling (Order=3), 96 per sida
@@ -191,14 +191,11 @@ def main():
 
     save_to_excel(now_str, ranks)
 
-    # Endast slutlig utskrift i önskat format
-    print(
-        f"Fractal Refine: Fabric Dark = {ranks.get('fabric_dark', '-')}, "
-        f"Mesh Dark = {ranks.get('mesh_dark', '-')}, "
-        f"Fabric Light = {ranks.get('fabric_light', '-')}, "
-        f"Mesh Light = {ranks.get('mesh_light', '-')} & "
-        f"Alcantara = {ranks.get('alcantara', '-')}."
-    )
+    VARIANTS = ["Fabric Dark", "Fabric Light", "Mesh Dark", "Mesh Light", "Alcantara"]
+    summary = ", ".join(
+        [f"{v} = {ranks.get(v, '-')}" for v in VARIANTS[:-1]]
+    ) + f" & {VARIANTS[-1]} = {ranks.get(VARIANTS[-1], '-')}"
+    print(f"Fractal Refine: {summary}.")
 
 if __name__ == "__main__":
     main()
