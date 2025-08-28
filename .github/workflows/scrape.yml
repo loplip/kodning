@@ -67,6 +67,10 @@ jobs:
           outputs[soder_stats]="$(python -u -m scripts.soder_stats 2>&1)"; rc[soder_stats]=$?
           echo "${outputs[soder_stats]}"
 
+          echo " "
+          outputs[soder_impressions]="$(python -u -m scripts.soder_impressions 2>&1)"; rc[soder_impressions]=$?
+          echo "${outputs[soder_impressions]}"
+
           # echo " "
           # outputs[fractal_refine]="$(python -u -m scripts.fractal_refine 2>&1)"; rc[fractal_refine]=$?
           # echo "${outputs[fractal_refine]}"
@@ -92,6 +96,7 @@ jobs:
               "adtraction_epc_finance"
               "rugvista_aov"
               "soder_stats"
+              "soder_impressions"
               # "fractal_refine"
               # "fractal_scape"
               "sitemap_fetch"

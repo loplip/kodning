@@ -279,7 +279,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--show-progress", dest="show_progress", action="store_true", help="Visa progress prints")
     ap.add_argument("--no-show-progress", dest="show_progress", action="store_false", help="Dölj progress prints")
-    ap.set_defaults(show_progress=False)
+    ap.set_defaults(show_progress=True)
     args = ap.parse_args()
     SHOW = args.show_progress
 
