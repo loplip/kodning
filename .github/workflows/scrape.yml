@@ -3,7 +3,7 @@ name: scrape-daily
 on:
   schedule:
     # 05:00 UTC ≈ 06:00 (sommar) / 07:00 (vinter) i Sverige
-    - cron: "0 5 * * *"
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -40,13 +40,10 @@ jobs:
         run: |
           python -m pip install -r requirements.txt
           python -m playwright install chromium
-          # INTE: python -m playwright install-deps
 
       - name: Kör alla scripts
-        continue-on-error: true
-        shell: bash
         run: |
-          set -o pipefail
+          set +e
           declare -A rc
           declare -A outputs
 
@@ -111,7 +108,7 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
-
+          exit 0
 
       - name: Lägg till backup-filer i ./history
         if: always()
