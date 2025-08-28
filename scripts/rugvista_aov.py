@@ -2,6 +2,8 @@
 from datetime import datetime
 import re, sys
 import time
+from zoneinfo import ZoneInfo
+TZ = ZoneInfo("Europe/Stockholm")
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -179,7 +181,7 @@ def main():
     else:
         aov_top50 = int(round(sum(top_slice) / len(top_slice)))
 
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ts = datetime.now(TZ).replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
     append_to_excel(ts, aov, aov_top50)
 
     # formatering med tusentalsmellanrum
