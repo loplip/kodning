@@ -24,7 +24,8 @@ Det används både som **manual för utvecklare** och som **instruktioner för A
   - Om fliken inte finns: skapa ny flik.  
   - Om fliken finns: lägg till en **ny rad** med de nya datavärdena.  
 - **Datumformat:**  
-  - `"YYYY-MM-DD"` (utan tid).  
+  - `"YYYY-MM-DD HH:MM"`.  
+  - Tänk på att jag har svensk tidszon.
 - **Talformat:**  
   - Mellanslag som tusentalsavgränsare, exempel:  
     - `1 300`  
@@ -53,7 +54,7 @@ SHOW_PROGRESS = True  # eller False
 ```bash
 /Kodning
   ./data        # xlsx-filer som skripts exporterar
-  ./history     # backup-filer av .xlsx sparas här efter varje Action
+  ./history     
   ./scripts     # här ligger alla skripts
     ./__pycache__
     ./common
@@ -95,7 +96,7 @@ from scripts.common.paths import DATA_DIR, HISTORY_DIR, SOURCES_DIR
 ## 🔑 Sammanfattning
 - Skrivsvar och dokumentation på svenska.  
 - Excel: skapa ny fil/flik/rad enligt regler ovan.  
-- Datumformat: `YYYY-MM-DD`.  
+- Datumformat: `YYYY-MM-DD HH:MM`. Tänk på att jag har svensk tidszon.
 - Tal: tusentalsavgränsare med mellanslag.  
 - Toggle för progress: `SHOW_PROGRESS = True/False`.  
 - Körbart både lokalt och via GitHub Actions.  
