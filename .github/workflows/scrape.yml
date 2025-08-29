@@ -68,8 +68,8 @@ jobs:
           echo "${outputs[soder_stats]}"
 
           echo " "
-          outputs[soder_impressions]="$(python -u -m scripts.soder_impressions 2>&1)"; rc[soder_impressions]=$?
-          echo "${outputs[soder_impressions]}"
+          outputs[soder_ads]="$(python -u -m scripts.soder_ads 2>&1)"; rc[soder_ads]=$?
+          echo "${outputs[soder_ads]}"
 
           # echo " "
           # outputs[fractal_refine]="$(python -u -m scripts.fractal_refine 2>&1)"; rc[fractal_refine]=$?

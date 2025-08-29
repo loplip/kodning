@@ -117,31 +117,32 @@ async def fetch_count_rendered(context, url: str) -> int | None:
         await page.close()
 
 def append_row_excel(path: Path, sheet: str, row_dict: dict, columns: list[str]) -> None:
-    """Appendar en rad till Excel, skapar fil/blad om de saknas."""
+    """Append en rad till Excel utan att skriva över andra blad.
+    Skapar fil/blad om de saknas."""
     from openpyxl import load_workbook
+
     df_new = pd.DataFrame([row_dict]).reindex(columns=columns)
 
-    if path.exists():
-        try:
-            wb = load_workbook(path)
-            if sheet in wb.sheetnames:
-                # append utan att läsa stora bladet i pandas
-                with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
-                    writer.book = wb
-                    writer.sheets = {ws.title: ws for ws in wb.worksheets}
-                    startrow = wb[sheet].max_row
-                    header = (startrow == 1)  # skriv header om tomt blad
-                    df_new.to_excel(writer, index=False, sheet_name=sheet, startrow=startrow, header=header)
-            else:
-                with pd.ExcelWriter(path, engine="openpyxl", mode="a") as writer:
-                    df_new.to_excel(writer, index=False, sheet_name=sheet)
-        except Exception:
-            # fallback: skriv om filen med endast vårt blad
-            with pd.ExcelWriter(path, engine="openpyxl", mode="w") as writer:
-                df_new.to_excel(writer, index=False, sheet_name=sheet)
-    else:
+    if not path.exists():
+        # Ny fil: skapa och skriv vårt blad med header
         with pd.ExcelWriter(path, engine="openpyxl", mode="w") as writer:
             df_new.to_excel(writer, index=False, sheet_name=sheet)
+        return
+
+    # Filen finns redan
+    wb = load_workbook(path)
+
+    if sheet in wb.sheetnames:
+        # Blad finns: append en rad under sista befintliga rad
+        ws = wb[sheet]
+        startrow = ws.max_row
+        with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            df_new.to_excel(writer, index=False, sheet_name=sheet, startrow=startrow, header=False)
+    else:
+        # Filen finns men inte bladet: skapa nytt blad
+        with pd.ExcelWriter(path, engine="openpyxl", mode="a") as writer:
+            df_new.to_excel(writer, index=False, sheet_name=sheet)
+
 
 async def main():
     today = datetime.now(ZoneInfo("Europe/Stockholm")).date().isoformat()
