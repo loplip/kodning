@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from scripts.common.paths import DATA_DIR
+from scripts.common.paths import DATA_DIR, SOURCES_DIR
 
 # =========================
 # KONFIG
@@ -21,6 +21,7 @@ EMAIL = "filip.helmroth@gmail.com"
 PASSWORD = "Hejsan123"
 
 XLSX = DATA_DIR / "data_epc_finance.xlsx"
+AUTH_STATE = SOURCES_DIR / "base_auth.json"
 
 # Fyra blad/flikar
 SHEETS = [
@@ -284,6 +285,7 @@ def apply_variant_filter(raw_items: list[tuple[float, str]], cc: str, variant: s
 # MAIN
 # =========================
 async def main():
+    SOURCES_DIR.mkdir(parents=True, exist_ok=True)
     enabled_countries = [c for c in ALL_COUNTRIES if c[3]]
     visible_for_columns = enabled_countries if not INCLUDE_DISABLED_IN_COLUMNS else ALL_COUNTRIES
 
@@ -303,14 +305,14 @@ async def main():
         await pwd_locator.fill(PASSWORD)
         await page_login.locator("button.btn.btn-primary[type=submit]").click()
         await page_login.wait_for_url(re.compile(r"secure\.adtraction\.com/partner/.*"))
-        await ctx_base.storage_state(path="base_auth.json")
+        await ctx_base.storage_state(path=str(AUTH_STATE))
         await ctx_base.close()
 
         # Skrapa rådata en gång per land/kategori
         raw_map: dict[tuple[str, int], list[tuple[float, str]]] = {}
         for country_name, country_id, cc, _ in enabled_countries:
             for cat_name, cat_id in CATEGORIES:
-                ctx = await browser.new_context(storage_state="base_auth.json")
+                ctx = await browser.new_context(storage_state=str(AUTH_STATE))
                 page = await ctx.new_page()
                 try:
                     raw = await scrape_category_country(page, country_id, cat_id)
