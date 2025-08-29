@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from scripts.common.paths import DATA_DIR  # kräver att denna finns i ditt repo
 OUT_PATH = DATA_DIR / "data.xlsx"
-SHEET    = "soder_ads"
+SHEET    = "SODER_ads"
 
 BASE_URL = "https://www.facebook.com/ads/library/"
 FIXED = {

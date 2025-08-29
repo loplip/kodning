@@ -96,7 +96,7 @@ jobs:
               "adtraction_epc_finance"
               "rugvista_aov"
               "soder_stats"
-              "soder_impressions"
+              "soder_ads"
               # "fractal_refine"
               # "fractal_scape"
               "sitemap_fetch"

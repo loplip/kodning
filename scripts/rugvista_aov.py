@@ -121,7 +121,7 @@ def fetch_all_prices():
     return prices_all, prices_page1
 
 def append_to_excel(timestamp_str: str, aov_int: int, aov_top50_int: int,
-                    path = DATA_DIR / "data.xlsx", sheet="rugvista_aov"):
+                    path = DATA_DIR / "data.xlsx", sheet="RUGV_aov"):
     p = Path(path)
     row = {"Datum": timestamp_str, "AOV": aov_int, "AOV Top-50": aov_top50_int}
 
