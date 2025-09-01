@@ -1,497 +1,566 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-sitemap_changes.py
---------------------------------
-- Hårdkodar källfil: sources/sitemaps_bolag.xlsx
-- Lagrar last_fetch_date (YYYY-MM-DD) per sitemap (dag-nivå)
-- Processar endast URL:er vars sitemap-lastmod > last_fetch_date och >= 2023-01-01
-- Öppnar/uppdaterar SQLite endast för hosts som faktiskt har kandidater
-- Skriver/uppdaterar Excel: data/data_sitemap.xlsx, blad: 'databas_incl_changes'
-  Kolumner: Senast modifierad, Bolag, Typ av sajt, Länk, Sitemap, Status, Ändringar
+sitemap_fetch_changes.py
+------------------------
+Hämtar sitemaps (från sources/sitemaps_bolag.xlsx), identifierar nya/ändrade/otillgängliga sidor
+och loggar till Excel.
+
+- Excel: skriver till .xlsx
+- Datumformat: YYYY-MM-DD HH:MM (Europe/Stockholm)
+- Talformat: mellanslag som tusentalsavgränsare (Excel number format) – (tillämpas där relevant)
+- SHOW_PROGRESS = True/False (True = loggar, False = endast slut-sammanfattning)
+- Körbart lokalt och i GitHub Actions
+- Paths från scripts/common/paths.py (DATA_DIR, HISTORY_DIR, SOURCES_DIR)
+- Importväg sätts via ROOT-hack (se nedan) för att funka i både lokal körning & Actions.
+
+Källa för sitemaps:
+- SOURCES_DIR / "sitemaps_bolag.xlsx" med kolumner: Bolag, Typ av sajt, Länk
+
+DB-layout (per host, i HISTORY_DIR / {host}.sqlite):
+- sitemaps(sm_url TEXT PRIMARY KEY, last_fetch_date TEXT, last_checked TEXT, sm_hash TEXT)
+- pages(url TEXT PRIMARY KEY, last_fetched TEXT, content_hash TEXT)
+- changes(id INTEGER PK, url TEXT, status TEXT, fetched_at TEXT, note TEXT)
+
+Statusvärden i Excel/rapport: "Ny", "Modifierad", "Otillgänglig"
 """
-
 from __future__ import annotations
-import sys
-import re
-import difflib
-import hashlib
-import sqlite3
+
 import argparse
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Tuple, Dict
+import hashlib
+import io
+import re
+import sqlite3
+import sys
+import time
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
-import requests
 import pandas as pd
-from xml.etree import ElementTree as ET
 
-try:
-    from bs4 import BeautifulSoup  # för textdiff
-except Exception:
-    BeautifulSoup = None  # fall tillbaka till rå HTML
+# För Excel
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import numbers
 
-# --- Repo-paths --------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[1]
+# --- Repo paths --------------------------------------------------------------
+from pathlib import Path as _Path
+ROOT = _Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+try:
+    from scripts.common.paths import DATA_DIR, HISTORY_DIR, SOURCES_DIR
+except Exception as e:
+    print("Kunde inte importera scripts/common/paths.py – säkerställ att repo-strukturen följs.", file=sys.stderr)
+    raise
 
-from scripts.common.paths import DATA_DIR, SOURCES_DIR  # noqa: E402
+# --- Konstanter --------------------------------------------------------------
+TZ = ZoneInfo("Europe/Stockholm")
 
-INPUT_XLSX = SOURCES_DIR / "sitemaps_bolag.xlsx"         # hårdkodat
-OUTPUT_XLSX = DATA_DIR / "data_sitemap.xlsx"
+SHOW_PROGRESS = True  # kan överstyras via CLI
+REQUEST_TIMEOUT = 30
+
+OUTPUT_XLSX = _Path(DATA_DIR) / "data_sitemap.xlsx"
 OUTPUT_SHEET = "databas_incl_changes"
-SITES_DIR = SOURCES_DIR / "sites"                        # här läggs SQLite
-SITES_DIR.mkdir(parents=True, exist_ok=True)
+LATEST_SHEET = "senaste_korning"
+LATEST_MD = _Path(DATA_DIR) / "last_run_changes.md"
 
-DATE_PAT = re.compile(r"(\d{4}[-/]\d{2}[-/]\d{2})")
-UA = "Mozilla/5.0 (compatible; SitemapWatcher/6.1)"
+MIN_LASTMOD_DATE = "2000-01-01"  # säkerhetsnät
 
-# Global cutoff – URL:er äldre än detta tas inte med i SQLite alls
-MIN_LASTMOD_DATE = "2023-01-01"
+# --- Hjälpfunktioner för tid -------------------------------------------------
+def local_today_str() -> str:
+    return datetime.now(TZ).strftime("%Y-%m-%d")
 
-def utc_today_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def local_now_str() -> str:
+    return datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
 
-def utc_now_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+# --- Nätverk -----------------------------------------------------------------
+def http_get(url: str) -> Tuple[int, bytes, Dict[str, str]]:
+    """
+    Minimal GET med urllib (requests kan finnas men undvik extra beroenden).
+    """
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; SiteChangeBot/1.0)"})
+    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+        code = resp.getcode()
+        data = resp.read()
+        headers = {k.lower(): v for k, v in resp.getheaders()}
+        return code, data, headers
 
-# --- Hjälpare ----------------------------------------------------------------
-def norm_date(s: Optional[str]) -> Optional[str]:
-    if not s:
-        return None
-    m = DATE_PAT.search(s)
-    if m:
-        return m.group(1).replace("/", "-")
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+# --- Sitemap-parsning --------------------------------------------------------
+@dataclass
+class UrlEntry:
+    loc: str
+    lastmod: Optional[str]  # "YYYY-MM-DD" eller ISO – normaliseras till YYYY-MM-DD
+
+def parse_sitemap_xml(xml_bytes: bytes) -> Tuple[List[str], List[UrlEntry]]:
+    """
+    Returnera (sitemap_urls, url_entries).
+    Hanterar både <sitemapindex> och <urlset>. Enkel namespace-hantering.
+    """
+    text = xml_bytes.decode("utf-8", errors="ignore")
+    # Ta bort BOM och nonsens
+    text = re.sub(r"^\ufeff", "", text)
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        # Försök strippa DOCTYPE/enkla fel
+        stripped = re.sub(r"<!DOCTYPE[^>]*>", "", text, flags=re.IGNORECASE | re.DOTALL)
+        root = ET.fromstring(stripped)
+
+    tag = root.tag.lower()
+    # Namespace cleanup
+    if "}" in tag:
+        ns = tag.split("}")[0] + "}"
+    else:
+        ns = ""
+
+    sm_urls: List[str] = []
+    entries: List[UrlEntry] = []
+
+    if root.tag.endswith("sitemapindex"):
+        for sm in root.findall(f".//{ns}sitemap"):
+            loc_el = sm.find(f"{ns}loc")
+            if loc_el is not None and loc_el.text:
+                sm_urls.append(loc_el.text.strip())
+    else:
+        for u in root.findall(f".//{ns}url"):
+            loc_el = u.find(f"{ns}loc")
+            if loc_el is None or not loc_el.text:
+                continue
+            loc = loc_el.text.strip()
+            lm_el = u.find(f"{ns}lastmod")
+            lastmod = None
+            if lm_el is not None and lm_el.text:
+                lastmod = normalize_date(lm_el.text.strip())
+            entries.append(UrlEntry(loc=loc, lastmod=lastmod))
+    return sm_urls, entries
+
+def normalize_date(s: str) -> Optional[str]:
+    """
+    Försök att få YYYY-MM-DD ur en ISO-sträng.
+    """
+    s = s.strip()
+    patterns = [
+        "%Y-%m-%d",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+    ]
+    for p in patterns:
         try:
-            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+            dt = datetime.strptime(s, p)
+            return dt.strftime("%Y-%m-%d")
         except Exception:
-            pass
+            continue
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
+    if m:
+        return m.group(1)
     return None
 
-def fetch(url: str, timeout=15) -> requests.Response:
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout, allow_redirects=True)
-    r.raise_for_status()
-    return r
+# --- DB-hjälp (per host) -----------------------------------------------------
+def host_db_path(host: str) -> _Path:
+    p = _Path(SOURCES_DIR) / "sites" / f"{host}.sqlite"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
-def looks_like_xml(text: str) -> bool:
-    t = text.lstrip().lower()
-    return t.startswith("<?xml") or "<urlset" in t or "<sitemapindex" in t
-
-def text_fingerprint(html: str) -> Tuple[str, str]:
-    """Returnera (hash, text_for_diff). Använder bs4 om tillgänglig, annars rå html."""
-    if BeautifulSoup is not None:
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            for tag in soup(["script", "style", "noscript"]):
-                tag.decompose()
-            text = soup.get_text(separator="\n")
-        except Exception:
-            text = html
-    else:
-        text = html
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    normalized = "\n".join(lines)
-    sha = hashlib.sha256(normalized.encode("utf-8", errors="ignore")).hexdigest()
-    return sha, normalized
-
-def compute_diff(old_text: str, new_text: str, max_lines: int = 80) -> str:
-    diff_iter = difflib.unified_diff(
-        old_text.splitlines(), new_text.splitlines(),
-        fromfile="old", tofile="new", lineterm=""
-    )
-    diff_lines = list(diff_iter)
-    if max_lines and len(diff_lines) > max_lines:
-        head = diff_lines[:max_lines]
-        head.append(f"... (trunkerad, totalt {len(diff_lines)} diff-rader)")
-        return "\n".join(head)
-    return "\n".join(diff_lines)
-
-# --- Parsers -----------------------------------------------------------------
-def parse_xml(xml_text: str) -> list[tuple[str, Optional[str]]]:
-    """Returnerar list[(url, date)] och följer ev. <sitemapindex> rekursivt."""
-    out: list[tuple[str, Optional[str]]] = []
-    root = ET.fromstring(xml_text.encode("utf-8"))
-    ns = {"ns": root.tag.split('}')[0].strip('{')} if root.tag.startswith("{") else {}
-
-    # sitemapindex -> följ undersitemaps
-    sitems = root.findall(".//ns:sitemap", ns) if ns else root.findall(".//sitemap")
-    for sm in sitems:
-        loc_el = sm.find("ns:loc", ns) if ns else sm.find("loc")
-        if loc_el is not None and loc_el.text:
-            loc = loc_el.text.strip()
-            try:
-                r = fetch(loc)
-                out.extend(parse(r.text))
-            except Exception:
-                pass
-
-    # urlset -> samla länkar
-    url_elems = root.findall(".//ns:url", ns) if ns else root.findall(".//url")
-    date_field_names = {
-        "lastmod", "last-mod", "last-modified", "last_modified",
-        "modified", "updated", "pubdate", "publication_date", "publication-date"
-    }
-    for u in url_elems:
-        loc_el = u.find("ns:loc", ns) if ns else u.find("loc")
-        loc = loc_el.text.strip() if (loc_el is not None and loc_el.text) else None
-        date_val = None
-        for tag in date_field_names:
-            el = u.find(f"ns:{tag}", ns) if ns else u.find(tag)
-            if el is not None and el.text:
-                date_val = norm_date(el.text)
-                if date_val:
-                    break
-        if not date_val:
-            # fallback: sök datum i alla texter
-            for el in u.iter():
-                if el.text:
-                    maybe = norm_date(el.text)
-                    if maybe:
-                        date_val = maybe
-                        break
-        if loc:
-            out.append((loc, date_val))
-    return out
-
-def parse_table_or_text(text: str) -> list[tuple[str, Optional[str]]]:
-    out: list[tuple[str, Optional[str]]] = []
-    for line in text.splitlines():
-        m_url = re.search(r"https?://\S+", line)
-        if not m_url:
-            continue
-        url = m_url.group(0)
-        d = norm_date(line)
-        out.append((url, d))
-    if not out:
-        urls = re.findall(r"https?://[\w\-\./%?=&#]+", text)
-        dates = re.findall(DATE_PAT, text)
-        if urls:
-            if len(urls) == len(dates):
-                out = list(zip(urls, [d[0] for d in dates]))
-            else:
-                out = [(u, None) for u in urls]
-    return out
-
-def parse(text: str) -> list[tuple[str, Optional[str]]]:
-    if looks_like_xml(text):
-        try:
-            return parse_xml(text)
-        except Exception:
-            return parse_table_or_text(text)
-    return parse_table_or_text(text)
-
-# --- DB (per host) -----------------------------------------------------------
-def ensure_db(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
-    cur = con.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pages (
-            url TEXT PRIMARY KEY,
-            last_hash TEXT,
-            last_content TEXT,
-            last_fetched TEXT,
-            last_modified TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS changes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT,
-            fetched_at TEXT,
-            status TEXT,
-            diff_text TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS sitemaps (
-            sm_url TEXT PRIMARY KEY,
-            last_fetch_date TEXT,     -- YYYY-MM-DD (dag-nivå)
-            sm_hash TEXT,
-            last_checked TEXT
-        )
-    """)
-    # säkerställ ev. nya kolumner
-    def ensure_col(tbl: str, col: str):
-        cur.execute(f"PRAGMA table_info({tbl})")
-        cols = {r[1] for r in cur.fetchall()}
-        if col not in cols:
-            cur.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT")
-    for col in ("last_fetch_date", "sm_hash", "last_checked"):
-        ensure_col("sitemaps", col)
+def conn_for_host(host: str) -> sqlite3.Connection:
+    con = sqlite3.connect(host_db_path(host))
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS sitemaps(
+        sm_url TEXT PRIMARY KEY,
+        last_fetch_date TEXT,    -- YYYY-MM-DD (endast när vi faktiskt behandlat kandidater)
+        last_checked TEXT,       -- YYYY-MM-DD HH:MM
+        sm_hash TEXT
+    )""")
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS pages(
+        url TEXT PRIMARY KEY,
+        last_fetched TEXT,       -- YYYY-MM-DD HH:MM
+        content_hash TEXT
+    )""")
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS changes(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT,
+        status TEXT,             -- Ny | Modifierad | Otillgänglig | Oförändrad (ev. internt)
+        fetched_at TEXT,         -- YYYY-MM-DD HH:MM
+        note TEXT
+    )""")
     con.commit()
     return con
 
-def db_get_sitemap(con: sqlite3.Connection, sm_url: str):
+def db_get_sitemap(con: sqlite3.Connection, sm_url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     cur = con.cursor()
-    cur.execute("SELECT sm_url,last_fetch_date,sm_hash,last_checked FROM sitemaps WHERE sm_url=?", (sm_url,))
-    return cur.fetchone()
+    cur.execute("SELECT last_fetch_date, last_checked, sm_hash FROM sitemaps WHERE sm_url=?", (sm_url,))
+    row = cur.fetchone()
+    return (row[0], row[1], row[2]) if row else (None, None, None)
 
-def db_set_sitemap_fetch_date(con: sqlite3.Connection, sm_url: str, day: str, sm_hash: Optional[str]) -> None:
+def db_set_sitemap_fetch_date(con: sqlite3.Connection, sm_url: str, last_fetch_date: str, sm_hash: Optional[str]) -> None:
     cur = con.cursor()
-    now = utc_now_str()
+    now = local_now_str()
     cur.execute("""
-        INSERT INTO sitemaps(sm_url,last_fetch_date,sm_hash,last_checked)
-        VALUES(?,?,?,?)
-        ON CONFLICT(sm_url) DO UPDATE SET
-            last_fetch_date=excluded.last_fetch_date,
-            sm_hash=COALESCE(excluded.sm_hash, sitemaps.sm_hash),
-            last_checked=excluded.last_checked
-    """, (sm_url, day, sm_hash, now))
+    INSERT INTO sitemaps(sm_url,last_fetch_date,last_checked,sm_hash)
+    VALUES(?,?,?,?)
+    ON CONFLICT(sm_url) DO UPDATE SET
+        last_fetch_date=excluded.last_fetch_date,
+        last_checked=excluded.last_checked,
+        sm_hash=COALESCE(excluded.sm_hash, sitemaps.sm_hash)
+    """, (sm_url, last_fetch_date, now, sm_hash))
     con.commit()
 
-def db_get_page(con: sqlite3.Connection, url: str):
+def db_touch_sitemap_checked(con: sqlite3.Connection, sm_url: str, sm_hash: Optional[str]) -> None:
     cur = con.cursor()
-    cur.execute("SELECT url,last_hash,last_content,last_fetched,last_modified FROM pages WHERE url=?", (url,))
-    return cur.fetchone()
-
-def db_upsert_page(con: sqlite3.Connection, url: str, h: str, content: str, modified: Optional[str]) -> None:
-    cur = con.cursor()
-    now = utc_now_str()
+    now = local_now_str()
     cur.execute("""
-        INSERT INTO pages(url,last_hash,last_content,last_fetched,last_modified)
-        VALUES(?,?,?,?,?)
-        ON CONFLICT(url) DO UPDATE SET
-            last_hash=excluded.last_hash,
-            last_content=excluded.last_content,
-            last_fetched=excluded.last_fetched,
-            last_modified=COALESCE(excluded.last_modified, pages.last_modified)
-    """, (url, h, content, now, modified))
+    INSERT INTO sitemaps(sm_url,last_checked,sm_hash)
+    VALUES(?,?,?)
+    ON CONFLICT(sm_url) DO UPDATE SET
+        last_checked=excluded.last_checked,
+        sm_hash=COALESCE(excluded.sm_hash, sitemaps.sm_hash)
+    """, (sm_url, now, sm_hash))
     con.commit()
 
-def db_add_change(con: sqlite3.Connection, url: str, status: str, diff_text: str) -> None:
+def db_get_page(con: sqlite3.Connection, url: str) -> Optional[Tuple[str, str]]:
     cur = con.cursor()
-    cur.execute("INSERT INTO changes(url,fetched_at,status,diff_text) VALUES(?,?,?,?)", (url, utc_now_str(), status, diff_text))
+    cur.execute("SELECT last_fetched, content_hash FROM pages WHERE url=?", (url,))
+    row = cur.fetchone()
+    return (row[0], row[1]) if row else None
+
+def db_upsert_page(con: sqlite3.Connection, url: str, content_hash: str) -> None:
+    cur = con.cursor()
+    now = local_now_str()
+    cur.execute("""
+    INSERT INTO pages(url,last_fetched,content_hash)
+    VALUES(?,?,?)
+    ON CONFLICT(url) DO UPDATE SET
+        last_fetched=excluded.last_fetched,
+        content_hash=excluded.content_hash
+    """, (url, now, content_hash))
     con.commit()
 
-# Enkel connection-cache per host (öppna endast när vi måste)
-_conns: Dict[str, sqlite3.Connection] = {}
-def conn_for_host(host: str) -> sqlite3.Connection:
-    if host not in _conns:
-        _conns[host] = ensure_db(SITES_DIR / f"{host.replace(':','_')}.sqlite")
-    return _conns[host]
+def db_insert_change(con: sqlite3.Connection, url: str, status: str, note: str) -> None:
+    cur = con.cursor()
+    now = local_now_str()
+    cur.execute("""
+    INSERT INTO changes(url,status,fetched_at,note) VALUES(?,?,?,?)
+    """, (url, status, now, note))
+    con.commit()
 
-# --- Main --------------------------------------------------------------------
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--show-progress", dest="show_progress", action="store_true", help="Visa progress prints")
-    ap.add_argument("--no-show-progress", dest="show_progress", action="store_false", help="Dölj progress prints")
-    ap.set_defaults(show_progress=True)
-    args = ap.parse_args()
-    SHOW = args.show_progress
-
-    if not INPUT_XLSX.exists():
-        raise SystemExit(f"Hittar inte {INPUT_XLSX}")
-
-    if SHOW:
-        print(f"[INIT] Läser källor från {INPUT_XLSX}")
-
-    # Läs källor
-    src = pd.read_excel(INPUT_XLSX)
-    src = src.rename(columns={c: c.strip() for c in src.columns})
-    required = ["Bolag", "Typ av sajt", "Länk"]
-    for r in required:
-        if r not in src.columns:
-            raise SystemExit(f"Saknar kolumn '{r}' i {INPUT_XLSX}")
-
-    # Läs befintlig output (för historik)
+# --- Excel helpers ------------------------------------------------------------
+def ensure_output_sheet() -> None:
+    OUTPUT_XLSX.parent.mkdir(parents=True, exist_ok=True)
+    cols = ["Senast modifierad","Bolag","Typ av sajt","Länk","Sitemap","Status","Ändringar"]
     if OUTPUT_XLSX.exists():
         try:
-            db_out = pd.read_excel(OUTPUT_XLSX, sheet_name=OUTPUT_SHEET)
+            with pd.ExcelWriter(OUTPUT_XLSX, engine="openpyxl", mode="a", if_sheet_exists="overlay") as xw:
+                if OUTPUT_SHEET not in xw.book.sheetnames:
+                    pd.DataFrame(columns=cols).to_excel(xw, index=False, sheet_name=OUTPUT_SHEET)
         except Exception:
-            db_out = pd.DataFrame(columns=["Senast modifierad","Bolag","Typ av sajt","Länk","Sitemap","Status","Ändringar"])
-    else:
-        db_out = pd.DataFrame(columns=["Senast modifierad","Bolag","Typ av sajt","Länk","Sitemap","Status","Ändringar"])
-
-    def keyify(row):
-        return (
-            str(row.get("Senast modifierad","")),
-            str(row.get("Bolag","")),
-            str(row.get("Typ av sajt","")),
-            str(row.get("Länk","")),
-            str(row.get("Status","")),
-        )
-    existing = set(db_out.apply(keyify, axis=1).tolist()) if not db_out.empty else set()
-
-    new_rows = []
-    today = utc_today_str()
-
-    for _, r in src.iterrows():
-        company = str(r["Bolag"]).strip()
-        site_type = str(r["Typ av sajt"]).strip()
-        sm_url = str(r["Länk"]).strip()
-        if not sm_url.startswith(("http://","https://")):
-            if SHOW: print(f"[SKIP] Ogiltig sitemap-URL: {sm_url}")
-            continue
-
-        sm_host = urlparse(sm_url).netloc
-        sm_con = conn_for_host(sm_host)
-        sm_prev = db_get_sitemap(sm_con, sm_url)
-        last_fetch_date = sm_prev[1] if sm_prev else None
-
-        if last_fetch_date == today:
-            if SHOW: print(f"[SKIP] {sm_url} redan fetchad idag ({today})")
-            continue
-
-        if SHOW: print(f"[SITEMAP] Hämtar {sm_url}")
-        try:
-            sm_resp = fetch(sm_url, timeout=15)
-        except Exception as e:
-            print(f"[FEL] Kunde inte läsa sitemap: {sm_url} ({e})")
-            continue
-
-        sm_text = sm_resp.text
-        sm_hash = hashlib.sha256(sm_text.encode("utf-8", errors="ignore")).hexdigest()
-        entries = parse(sm_text)
-        total = len(entries)
-
-        # Filtrera: kräver lastmod och ska vara >= MIN_LASTMOD_DATE och > last_fetch_date (om finns)
-        candidates: list[tuple[str, str]] = []
-        for page_url, d in entries:
-            if not d:
-                continue
-            if d < MIN_LASTMOD_DATE:
-                continue
-            if (last_fetch_date is None) or (d > last_fetch_date):
-                candidates.append((page_url, d))
-
-        if SHOW:
-            print(f"[FILTER] {sm_url}: {total} poster → kandidater efter datumfilter: {len(candidates)} "
-                  f"(cutoff {MIN_LASTMOD_DATE}, efter {last_fetch_date or '—'})")
-
-        if not candidates:
-            db_set_sitemap_fetch_date(sm_con, sm_url, today, sm_hash)
-            if SHOW: print(f"[DONE] Inga kandidater. Markerar {sm_url} som fetchad {today}.")
-            continue
-
-        # Bearbeta endast kandidaterna
-        per_host_counts: Dict[str,int] = {}
-        for page_url, d in candidates:
-            page_host = urlparse(page_url).netloc
-            con = conn_for_host(page_host)
-            per_host_counts[page_host] = per_host_counts.get(page_host, 0) + 1
-
-            try:
-                resp = fetch(page_url, timeout=15)
-            except Exception as e:
-                status = "Otillgänglig"
-                change_note = f"Kunde inte hämta sida: {e}"
-                row = {
-                    "Senast modifierad": d,
-                    "Bolag": company,
-                    "Typ av sajt": site_type,
-                    "Länk": page_url,
-                    "Sitemap": sm_url,
-                    "Status": status,
-                    "Ändringar": change_note,
-                }
-                if keyify(row) not in existing:
-                    new_rows.append(row)
-                continue
-
-            html = resp.text
-            new_hash, new_text = text_fingerprint(html)
-            prev = db_get_page(con, page_url)
-
-            if prev is None:
-                # Ny sida (men fortfarande efter cutoff)
-                db_upsert_page(con, page_url, new_hash, new_text, d)
-                db_add_change(con, page_url, "Ny", "")
-                row = {
-                    "Senast modifierad": d,
-                    "Bolag": company,
-                    "Typ av sajt": site_type,
-                    "Länk": page_url,
-                    "Sitemap": sm_url,
-                    "Status": "Ny",
-                    "Ändringar": "",
-                }
-                if keyify(row) not in existing:
-                    new_rows.append(row)
-            else:
-                _, old_hash, old_text, _, _ = prev
-                if old_hash != new_hash:
-                    diff_text = compute_diff(old_text or "", new_text or "", max_lines=80)
-                    db_upsert_page(con, page_url, new_hash, new_text, d)
-                    db_add_change(con, page_url, "Modifierad", diff_text)
-                    row = {
-                        "Senast modifierad": d,
-                        "Bolag": company,
-                        "Typ av sajt": site_type,
-                        "Länk": page_url,
-                        "Sitemap": sm_url,
-                        "Status": "Modifierad",
-                        "Ändringar": diff_text,
-                    }
-                    if keyify(row) not in existing:
-                        new_rows.append(row)
-
-        # Markera sitemapen som fetchad idag
-        db_set_sitemap_fetch_date(sm_con, sm_url, today, sm_hash)
-        if SHOW:
-            tot = sum(per_host_counts.values())
-            details = ", ".join(f"{h}:{n}" for h,n in per_host_counts.items())
-            print(f"[DONE] {sm_url} — kandidater: {tot} ({details})")
-
-    # Skriv Excel endast om något nytt kom in
-    if new_rows:
-        df_append = pd.DataFrame(new_rows)
-
-        # sortera och normalisera datumformat
-        df_append["Senast modifierad"] = pd.to_datetime(df_append["Senast modifierad"], errors="coerce")
-        df_append = df_append.sort_values("Senast modifierad", ascending=False)
-        df_append["Senast modifierad"] = df_append["Senast modifierad"].dt.strftime("%Y-%m-%d")
-
-        OUTPUT_XLSX.parent.mkdir(parents=True, exist_ok=True)
-
-        if OUTPUT_XLSX.exists():
-            # APPEND till befintligt blad
-            try:
-                # Pandas >= 1.4: använd if_sheet_exists="overlay"
-                with pd.ExcelWriter(
-                    OUTPUT_XLSX, engine="openpyxl", mode="a", if_sheet_exists="overlay"
-                ) as xw:
-                    try:
-                        ws = xw.book[OUTPUT_SHEET]
-                        startrow = ws.max_row if ws.max_row else 0
-                        header = False if startrow and startrow > 1 else True
-                    except KeyError:
-                        # Bladet finns inte -> skapa från rad 0 med header
-                        startrow, header = 0, True
-
-                    df_append.to_excel(
-                        xw, index=False, sheet_name=OUTPUT_SHEET, startrow=startrow, header=header
-                    )
-
-            except TypeError:
-                # Äldre Pandas utan if_sheet_exists -> fallback med openpyxl
-                import openpyxl
-                from openpyxl.utils.dataframe import dataframe_to_rows
-
-                wb = openpyxl.load_workbook(OUTPUT_XLSX)
-                ws = wb[OUTPUT_SHEET] if OUTPUT_SHEET in wb.sheetnames else wb.create_sheet(OUTPUT_SHEET)
-
-                write_header = ws.max_row <= 1  # skriv header om bladet i princip är tomt
-                for i, row in enumerate(dataframe_to_rows(df_append, index=False, header=write_header)):
-                    # openpyxl returnerar tomma rader ibland – hoppa över dem
-                    if row is None or (isinstance(row, list) and all(c is None for c in row)):
-                        continue
-                    ws.append(row)
+            wb = load_workbook(OUTPUT_XLSX)
+            if OUTPUT_SHEET not in wb.sheetnames:
+                ws = wb.create_sheet(OUTPUT_SHEET)
+                ws.append(cols)
                 wb.save(OUTPUT_XLSX)
-
-        else:
-            # Filen finns inte – skapa ny och skriv hela df_append
-            with pd.ExcelWriter(OUTPUT_XLSX, engine="openpyxl", mode="w") as xw:
-                df_append.to_excel(xw, index=False, sheet_name=OUTPUT_SHEET)
-
-        # Liten konsolrapport
-        for row in sorted(new_rows, key=lambda x: x["Senast modifierad"], reverse=True):
-            print(f"{row['Senast modifierad']} {row['Status']} {row['Bolag']}: {row['Länk']}")
     else:
-        print("Inga nya ändringar funna – skippade Excel-skrivning.")
+        with pd.ExcelWriter(OUTPUT_XLSX, engine="openpyxl", mode="w") as xw:
+            pd.DataFrame(columns=cols).to_excel(xw, index=False, sheet_name=OUTPUT_SHEET)
+
+def append_rows_to_sheet(rows: List[Dict[str, str]]) -> None:
+    ensure_output_sheet()
+    df_new = pd.DataFrame(rows, columns=["Senast modifierad","Bolag","Typ av sajt","Länk","Sitemap","Status","Ändringar"])
+    try:
+        existing = pd.read_excel(OUTPUT_XLSX, sheet_name=OUTPUT_SHEET, dtype=str)
+    except Exception:
+        existing = pd.DataFrame(columns=df_new.columns)
+    combined = pd.concat([existing, df_new], ignore_index=True)
+    with pd.ExcelWriter(OUTPUT_XLSX, engine="openpyxl", mode="a", if_sheet_exists="overlay") as xw:
+        try:
+            ws = xw.book[OUTPUT_SHEET]
+            xw.book.remove(ws)
+        except KeyError:
+            pass
+        combined.to_excel(xw, index=False, sheet_name=OUTPUT_SHEET)
+
+def write_latest_sheet(df_latest: pd.DataFrame) -> None:
+    ensure_output_sheet()
+    with pd.ExcelWriter(OUTPUT_XLSX, engine="openpyxl", mode="a", if_sheet_exists="overlay") as xw:
+        try:
+            ws = xw.book[LATEST_SHEET]
+            xw.book.remove(ws)
+        except KeyError:
+            pass
+        df_latest.to_excel(xw, index=False, sheet_name=LATEST_SHEET)
+
+# --- Utility -----------------------------------------------------------------
+def sha256_bytes(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+def hostname_of(url: str) -> str:
+    return urlparse(url).hostname or "unknown"
+
+def company_from_host(host: str) -> str:
+    return host.replace("www.", "")
+
+def site_type_from_url(url: str) -> str:
+    p = url.lower()
+    if "/blog" in p or p.endswith("/blog"):
+        return "Blogg"
+    if "/news" in p or "/nyheter" in p:
+        return "Nyheter"
+    if "/partner" in p:
+        return "Partner"
+    return "Webb"
+
+# --- Kandidatlogik -----------------------------------------------------------
+def pick_candidates(entries: List[UrlEntry]) -> List[Tuple[str, Optional[str]]]:
+    """
+    Returnerar lista av (page_url, lastmod_YYYY_MM_DD eller None) som ska behandlas.
+    Regler:
+      - Okänd URL (saknas i pages) -> alltid kandidat.
+      - Känd URL -> kandidat om:
+          * lastmod saknas, eller
+          * lastmod >= sidans last_fetched (dagjämförelse)
+    """
+    candidates: List[Tuple[str, Optional[str]]] = []
+    for e in entries:
+        page_url = e.loc.strip()
+        host = hostname_of(page_url)
+        con = conn_for_host(host)
+        prev = db_get_page(con, page_url)
+        if prev is None:
+            candidates.append((page_url, e.lastmod))
+            continue
+        prev_last_fetched = (prev[0] or "")[:10]  # YYYY-MM-DD
+        if e.lastmod is None:
+            candidates.append((page_url, None))
+        else:
+            if e.lastmod >= max(prev_last_fetched, MIN_LASTMOD_DATE):
+                candidates.append((page_url, e.lastmod))
+    return candidates
+
+# --- Körning per sitemap -----------------------------------------------------
+def process_sitemap(sm_url: str, seen_sitemaps: set, meta: Dict[str, Tuple[str, str]]) -> List[Dict[str, str]]:
+    """
+    Processa en sitemap-URL (rekursivt). Returnerar rader för Excel för denna körning.
+    'meta' mappar sitemap-url -> (bolag, typ av sajt) från käll-Excel.
+    """
+    if sm_url in seen_sitemaps:
+        return []
+    seen_sitemaps.add(sm_url)
+
+    if SHOW_PROGRESS:
+        print(f"[INFO] Hämtar sitemap: {sm_url}")
+
+    code, data, headers = http_get(sm_url)
+    if code != 200:
+        if SHOW_PROGRESS:
+            print(f"[VARNING] Kunde inte hämta sitemap ({code}): {sm_url}")
+        host = hostname_of(sm_url)
+        sm_con = conn_for_host(host)
+        db_touch_sitemap_checked(sm_con, sm_url, None)
+        return []
+
+    sm_hash = sha256_bytes(data)
+    sm_urls, entries = parse_sitemap_xml(data)
+
+    rows: List[Dict[str, str]] = []
+
+    if sm_urls:
+        # sitemapindex – processa child-sitemaps
+        for child in sm_urls:
+            rows.extend(process_sitemap(child, seen_sitemaps, meta))
+        host = hostname_of(sm_url)
+        sm_con = conn_for_host(host)
+        db_touch_sitemap_checked(sm_con, sm_url, sm_hash)
+        return rows
+
+    # urlset:
+    host = hostname_of(sm_url)
+    sm_con = conn_for_host(host)
+    last_fetch_date, last_checked, prev_sm_hash = db_get_sitemap(sm_con, sm_url)
+
+    candidates = pick_candidates(entries)
+
+    if not candidates:
+        db_touch_sitemap_checked(sm_con, sm_url, sm_hash)
+        if SHOW_PROGRESS:
+            print(f"[INFO] Inga kandidater i: {sm_url}")
+        return []
+
+    processed_lastmods: List[str] = []
+    per_run_rows: List[Dict[str, str]] = []
+
+    for page_url, lastmod in candidates:
+        page_host = hostname_of(page_url)
+        con = conn_for_host(page_host)
+
+        try:
+            code_p, data_p, _ = http_get(page_url)
+        except Exception as ex:
+            code_p = 0
+            data_p = b""
+
+        if code_p != 200:
+            db_insert_change(con, page_url, "Otillgänglig", f"HTTP {code_p}")
+            per_run_rows.append(row_for_excel(page_url, lastmod, sm_url, "Otillgänglig", f"HTTP {code_p}", meta))
+            continue
+
+        h = sha256_bytes(data_p)
+        prev = db_get_page(con, page_url)
+        if prev is None:
+            status = "Ny"
+            note = "Ny sida – ingen tidigare hash"
+            db_upsert_page(con, page_url, h)
+            db_insert_change(con, page_url, status, note)
+            per_run_rows.append(row_for_excel(page_url, lastmod, sm_url, status, note, meta))
+        else:
+            _, prev_hash = prev
+            if prev_hash != h:
+                status = "Modifierad"
+                note = "Innehåll ändrat (hash)"
+                db_upsert_page(con, page_url, h)
+                db_insert_change(con, page_url, status, note)
+                per_run_rows.append(row_for_excel(page_url, lastmod, sm_url, status, note, meta))
+            else:
+                db_insert_change(con, page_url, "Oförändrad", "Samma hash")
+
+        if lastmod:
+            processed_lastmods.append(lastmod)
+
+        time.sleep(0.05)
+
+    new_last_fetch_date = local_today_str()
+    if processed_lastmods:
+        high = max(processed_lastmods + [new_last_fetch_date])
+        new_last_fetch_date = high
+    db_set_sitemap_fetch_date(sm_con, sm_url, new_last_fetch_date, sm_hash)
+
+    rows.extend(per_run_rows)
+    return rows
+
+def row_for_excel(page_url: str, lastmod: Optional[str], sm_url: str, status: str, note: str,
+                  meta: Dict[str, Tuple[str, str]]) -> Dict[str, str]:
+    host = hostname_of(page_url)
+    bolag, typ = meta.get(sm_url, (company_from_host(host), site_type_from_url(page_url)))
+    return {
+        "Senast modifierad": (lastmod or local_now_str()[:10]),
+        "Bolag": bolag,
+        "Typ av sajt": typ,
+        "Länk": page_url,
+        "Sitemap": sm_url,
+        "Status": status,
+        "Ändringar": note,
+    }
+
+# --- Rapport (markdown + latest sheet) --------------------------------------
+def write_last_run_summary(rows: List[Dict[str, str]]) -> None:
+    df = pd.DataFrame(rows, columns=["Senast modifierad","Bolag","Typ av sajt","Länk","Sitemap","Status","Ändringar"])
+    # Markdown
+    with open(LATEST_MD, "w", encoding="utf-8") as f:
+        f.write(f"# Senaste körningen – {local_now_str()}\n\n")
+        for status in ["Modifierad", "Ny", "Otillgänglig"]:
+            sub = df[df["Status"] == status]
+            f.write(f"## {status} ({len(sub)})\n\n")
+            for _, r in sub.iterrows():
+                f.write(f"- {r['Bolag']} – [{r['Länk']}]({r['Länk']}) – {r['Senast modifierad']}\n")
+            f.write("\n")
+    # Excel-blad
+    write_latest_sheet(df)
+
+# --- Läs källor --------------------------------------------------------------
+def read_sitemaps_from_excel() -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
+    """
+    Läser SOURCES_DIR / 'sitemaps_bolag.xlsx' med kolumner:
+      - 'Bolag'
+      - 'Typ av sajt'
+      - 'Länk'
+    Returnerar (lista med sitemap-URL:er, meta-dict {sitemap_url: (Bolag, Typ)}).
+    """
+    path = _Path(SOURCES_DIR) / "sitemaps_bolag.xlsx"
+    if not path.exists():
+        print(f"[FEL] Hittar inte källfilen: {path}", file=sys.stderr)
+        return [], {}
+
+    df = pd.read_excel(path, sheet_name=0, dtype=str).fillna("")
+    # Normalisera kolumnnamn
+    cols = {c.lower().strip(): c for c in df.columns}
+    def col(name: str) -> str:
+        return cols.get(name.lower(), name)
+    c_bolag = col("Bolag")
+    c_typ = col("Typ av sajt")
+    c_lank = col("Länk")
+
+    sitemaps: List[str] = []
+    meta: Dict[str, Tuple[str, str]] = {}
+    for _, row in df.iterrows():
+        url = row.get(c_lank, "").strip()
+        if not url:
+            continue
+        bolag = row.get(c_bolag, "").strip() or ""
+        typ = row.get(c_typ, "").strip() or ""
+        sitemaps.append(url)
+        meta[url] = (bolag, typ)
+    return sitemaps, meta
+
+# --- Huvudflöde --------------------------------------------------------------
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    global SHOW_PROGRESS
+
+    parser = argparse.ArgumentParser(description="Hämta sitemaps och skriv förändringar till Excel.")
+    sp = parser.add_mutually_exclusive_group()
+    sp.add_argument("--show-progress", action="store_true", help="Visa loggar under körning.")
+    sp.add_argument("--no-show-progress", action="store_true", help="Dölj löpande loggar (endast sammanfattning i slutet).")
+    args = parser.parse_args(argv)
+
+    if args.show_progress:
+        SHOW_PROGRESS = True
+    if args.no_show_progress:
+        SHOW_PROGRESS = False
+
+    ensure_output_sheet()
+
+    sitemaps, meta = read_sitemaps_from_excel()
+    if not sitemaps:
+        print("[FEL] Inga sitemaps att behandla.", file=sys.stderr)
+        return 2
+
+    seen = set()
+    all_rows: List[Dict[str, str]] = []
+    for sm in sitemaps:
+        try:
+            rows = process_sitemap(sm, seen, meta)
+            all_rows.extend(rows)
+        except KeyboardInterrupt:
+            print("\nAvbrutet av användaren.", file=sys.stderr)
+            return 130
+        except Exception as ex:
+            print(f"[FEL] Undantag vid behandling av {sm}: {ex}", file=sys.stderr)
+
+    if all_rows:
+        append_rows_to_sheet(all_rows)
+        write_last_run_summary(all_rows)
+        if SHOW_PROGRESS:
+            print(f"[KLART] Nya rader skrivna: {len(all_rows)}")
+            print(f"Excel: {OUTPUT_XLSX}")
+            print(f"Senaste-körning (blad): {LATEST_SHEET}")
+            print(f"Snabbrapport (markdown): {LATEST_MD}")
+    else:
+        ensure_output_sheet()
+        write_latest_sheet(pd.DataFrame(columns=["Senast modifierad","Bolag","Typ av sajt","Länk","Sitemap","Status","Ändringar"]))
+        with open(LATEST_MD, "w", encoding="utf-8") as f:
+            f.write(f"# Senaste körningen – {local_now_str()}\n\nInga förändringar hittades.\n")
+        if SHOW_PROGRESS:
+            print("[INFO] Inga nya ändringar denna körning.")
+            print(f"Excel: {OUTPUT_XLSX}\nSenaste-körning (blad): {LATEST_SHEET}\nSnabbrapport: {LATEST_MD}")
+
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
