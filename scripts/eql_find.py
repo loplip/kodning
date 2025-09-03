@@ -94,6 +94,11 @@ def fetch_sweden_eql() -> pd.DataFrame:
     xls = pd.ExcelFile(buffer, engine="openpyxl")
     df = xls.parse(xls.sheet_names[0])
 
+    df = df.rename(columns={
+        'Aktiv substans': 'Active Substances',
+        'Verksamt ämne': 'Active Substances',
+    })
+
     for col in ('Innehavare', 'Ombud', 'Namn'):
         if col in df.columns:
             df[col] = df[col].astype(str)
@@ -102,7 +107,11 @@ def fetch_sweden_eql() -> pd.DataFrame:
     has_eql_agent  = df.get('Ombud', pd.Series(False, index=df.index)).str.contains(r'\bEQL\b', case=False, na=False)
     mask = has_eql_holder | has_eql_agent
 
-    want_cols = ['Namn', 'Styrka', 'Aktiv substans', 'Godkännande-datum', 'Innehavare']
+    # Säkerställ att den normaliserade kolumnen finns
+    if 'Active Substances' not in df.columns:
+        raise KeyError("Hittade varken 'Aktiv substans' eller 'Verksamt ämne' i filen.")
+
+    want_cols = ['Namn', 'Styrka', 'Active Substances', 'Godkännande-datum', 'Innehavare']
     if 'Ombud' in df.columns:
         want_cols.append('Ombud')
 
@@ -110,10 +119,11 @@ def fetch_sweden_eql() -> pd.DataFrame:
     subset = subset.rename(columns={
         'Namn': 'Product Name',
         'Styrka': 'Strength',
-        'Aktiv substans': 'Active Substances',
+        # 'Active Substances' är redan rätt namn
         'Godkännande-datum': 'Approval Date',
         'Innehavare': 'Marketing Holder',
     })
+
     if 'Ombud' in subset.columns:
         subset['Distributor'] = subset['Ombud'].replace('', pd.NA)
         subset = subset.drop(columns=['Ombud'])
@@ -277,10 +287,17 @@ def _collect_current() -> pd.DataFrame:
     combined = pd.concat([sweden_eql, denmark_eql, finland_eql], ignore_index=True)
     return _finalize_df(combined)
 
+def _normalize_text(s: pd.Series) -> pd.Series:
+    """Normalisera text: trimma, sätt första bokstav stor och resten små."""
+    return s.fillna("").astype(str).str.strip().str.capitalize()
+
 def _dedupe_on_key(df: pd.DataFrame) -> pd.DataFrame:
-    k = df[KEY_COLS].astype(str).agg('||'.join, axis=1)
-    df = df.assign(_k=k).drop_duplicates('_k').drop(columns=['_k'])
-    return df
+    normed = df.copy()
+    for col in KEY_COLS:
+        normed[col] = _normalize_text(normed[col])
+    k = normed[KEY_COLS].agg('||'.join, axis=1)
+    normed = normed.assign(_k=k).drop_duplicates('_k').drop(columns=['_k'])
+    return normed
 
 def _read_existing(path: Path) -> Optional[pd.DataFrame]:
     if not path.exists():

@@ -76,6 +76,12 @@ def fetch_sweden_eql() -> pd.DataFrame:
     xls = pd.ExcelFile(buffer, engine="openpyxl")
     df = xls.parse(xls.sheet_names[0])
 
+    # fånga båda varianterna av "Active Substances"
+    df = df.rename(columns={
+        'Aktiv substans': 'Active Substances',
+        'Verksamt ämne': 'Active Substances',
+    })
+
     for col in ('Innehavare', 'Ombud', 'Namn'):
         if col in df.columns:
             df[col] = df[col].astype(str)
@@ -84,7 +90,8 @@ def fetch_sweden_eql() -> pd.DataFrame:
     has_eql_agent  = df.get('Ombud', pd.Series(False, index=df.index)).str.contains(r'\bEQL\b', case=False, na=False)
     mask = has_eql_holder | has_eql_agent
 
-    want_cols = ['Namn', 'Styrka', 'Aktiv substans', 'Godkännande-datum', 'Innehavare']
+    # välj kolumner (obs: Active Substances finns nu alltid)
+    want_cols = ['Namn', 'Styrka', 'Active Substances', 'Godkännande-datum', 'Innehavare']
     if 'Ombud' in df.columns:
         want_cols.append('Ombud')
 
@@ -92,10 +99,10 @@ def fetch_sweden_eql() -> pd.DataFrame:
     subset = subset.rename(columns={
         'Namn': 'Product Name',
         'Styrka': 'Strength',
-        'Aktiv substans': 'Active Substances',
         'Godkännande-datum': 'Approval Date',
         'Innehavare': 'Marketing Holder',
     })
+    
     if 'Ombud' in subset.columns:
         subset['Distributor'] = subset['Ombud'].replace('', pd.NA)
         subset = subset.drop(columns=['Ombud'])
@@ -536,16 +543,28 @@ def _collect_current() -> pd.DataFrame:
     combined['Approval Date'] = approval_dt.dt.strftime('%Y-%m-%d')
     return combined.reset_index(drop=True)
 
+# --- nytt: normalisering av textfält ---
+def _normalize_text(s: pd.Series) -> pd.Series:
+    """Normalisera text: trimma, gör versaler/gemener enhetliga (alla VERSALER)."""
+    return s.fillna("").astype(str).str.strip().str.upper()
+
 def _anti_join_new_rows(new_df: pd.DataFrame, existing_df: pd.DataFrame) -> pd.DataFrame:
     """Hitta rader som saknas i befintlig fil (nyckel på Country, Product Name, Strength, Active Substances)."""
     key_cols = ['Country', 'Product Name', 'Strength', 'Active Substances']
     new_df = new_df.copy()
     existing_df = existing_df.copy()
-    new_df['_key'] = new_df[key_cols].astype(str).agg('||'.join, axis=1)
-    existing_df['_key'] = existing_df[key_cols].astype(str).agg('||'.join, axis=1)
+
+    # normalisera nyckelkolumner innan jämförelse
+    for col in key_cols:
+        new_df[col] = _normalize_text(new_df[col])
+        existing_df[col] = _normalize_text(existing_df[col])
+
+    new_df['_key'] = new_df[key_cols].agg('||'.join, axis=1)
+    existing_df['_key'] = existing_df[key_cols].agg('||'.join, axis=1)
     mask = ~new_df['_key'].isin(existing_df['_key'])
     out = new_df.loc[mask].drop(columns=['_key'])
     return out
+
 
 def _append_to_excel(path: Path, df_to_append: pd.DataFrame, sheet_name: str = 'Konkurrenter') -> None:
     """Append rader till befintligt ark utan att skriva över tidigare data."""
