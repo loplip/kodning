@@ -329,6 +329,15 @@ def _write_sorted(path: Path, df: pd.DataFrame) -> None:
                 pass
         df.to_excel(w, index=False, sheet_name=SHEET_NAME)
 
+def _build_keys(df: pd.DataFrame) -> pd.Series:
+    tmp = df.copy()
+    for col in KEY_COLS:
+        # samma normalisering som _dedupe_on_key
+        tmp[col] = _normalize_text(tmp[col])
+        # jämna ut None/NaN/"nan" → tomt
+        tmp[col] = tmp[col].replace({'none': '', 'nan': ''})
+    return tmp[KEY_COLS].agg('||'.join, axis=1)
+
 def main(output_path: Optional[Path] = None) -> None:
     out_path = Path(output_path) if output_path else OUT_PATH
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -340,15 +349,18 @@ def main(output_path: Optional[Path] = None) -> None:
         merged = current
         new_rows = current
     else:
+        # Bygg nycklar på normaliserad text i båda datamängderna
+        existing_keys = _build_keys(existing)
+        current_keys  = _build_keys(current)
+
+        # Slå ihop och deduplicera på normaliserade nycklar
         merged = pd.concat([existing, current], ignore_index=True)
         merged = _dedupe_on_key(merged)
-        # Identifiera vilka som är nya (finns i current men saknas i existing)
-        existing_keys = existing[KEY_COLS].astype(str).agg('||'.join, axis=1)
-        current_keys = current[KEY_COLS].astype(str).agg('||'.join, axis=1)
-        new_mask = ~current_keys.isin(existing_keys)
+
+        # Nya = finns i current men inte i existing (på normaliserade nycklar)
+        new_mask = ~current_keys.isin(set(existing_keys))
         new_rows = current.loc[new_mask]
 
-    # Skriv alltid HELA bladet sorterat (ny + gammal data)
     _write_sorted(out_path, merged)
 
     if new_rows.empty:
@@ -356,9 +368,8 @@ def main(output_path: Optional[Path] = None) -> None:
         return
 
     for _, r in new_rows.iterrows():
-        name = r.get('Product Name', '')
-        country = r.get('Country', '')
-        print(f"EQL: {name} har lagts till för {country}.")
+        print(f"EQL: {r.get('Product Name','')} har lagts till för {r.get('Country','')}.")
+
 
 if __name__ == '__main__':
     main()
