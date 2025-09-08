@@ -111,7 +111,7 @@ def main():
         diff_fmt = f"{diff:,}".replace(",", " ") if diff is not None else None
 
         if diff_fmt is not None:
-            print(f"Adtraction: {conv_fmt} konverteringar, {brands_fmt} annonsörer och en diff på {diff_fmt}.")
+            print(f"Adtraction: Konverteringar: {conv_fmt} (diff: {diff_fmt}) & annonsörer: {brands_fmt}.")
         else:
             print(f"Adtraction: {conv_fmt} konverteringar, {brands_fmt} annonsörer.")
 
