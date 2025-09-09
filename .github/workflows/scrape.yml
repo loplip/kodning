@@ -3,7 +3,7 @@ name: scrape-daily
 on:
   schedule:
     # 05:00 UTC ≈ 06:00 (sommar) / 07:00 (vinter) i Sverige
-    - cron: "0 4 * * *"
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 permissions:

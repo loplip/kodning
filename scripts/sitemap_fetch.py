@@ -49,10 +49,22 @@ def norm_date(s: str | None) -> str | None:
     return None
 
 def fetch(url: str, timeout=25):
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; SitemapWatcher/3.0)"}
-    r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-    r.raise_for_status()
-    return r.text, r.headers.get("Content-Type", "")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "sv-SE,sv;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Connection": "keep-alive",
+    }
+    with requests.Session() as s:
+        s.headers.update(headers)
+        r = s.get(url, timeout=timeout, allow_redirects=True)
+        r.raise_for_status()
+        return r.text, r.headers.get("Content-Type", "")
+
 
 def looks_like_xml(text: str) -> bool:
     t = text.lstrip().lower()
