@@ -123,11 +123,13 @@ def fetch_all_prices():
 def append_to_excel(timestamp_str: str, aov_int: int, aov_top50_int: int,
                     path = DATA_DIR / "data.xlsx", sheet="RUGV_aov"):
     p = Path(path)
-    row = {"Datum": timestamp_str, "AOV": aov_int, "AOV Top-50": aov_top50_int}
+    # Byt kolumnnamn här
+    cols = ["Datum", "RugVista 100", "RugVista 50"]
+    row = {"Datum": timestamp_str, "RugVista 100": aov_int, "RugVista 50": aov_top50_int}
 
     # Ny fil
     if not p.exists():
-        pd.DataFrame([row], columns=["Datum", "AOV", "AOV Top-50"]).to_excel(path, index=False, sheet_name=sheet)
+        pd.DataFrame([row], columns=cols).to_excel(path, index=False, sheet_name=sheet)
         return
 
     try:
@@ -136,13 +138,13 @@ def append_to_excel(timestamp_str: str, aov_int: int, aov_top50_int: int,
             ws = wb[sheet]
             # Sätt rubriker om tomt ark
             if ws.max_row == 1 and ws["A1"].value is None:
-                ws["A1"].value, ws["B1"].value, ws["C1"].value = "Datum", "AOV", "AOV Top-50"
+                ws["A1"].value, ws["B1"].value, ws["C1"].value = cols
                 next_row = 2
             else:
                 # Säkerställ att kolumnrubriker finns
                 if ws["A1"].value != "Datum": ws["A1"].value = "Datum"
-                if ws["B1"].value != "AOV": ws["B1"].value = "AOV"
-                if ws["C1"].value != "AOV Top-50": ws["C1"].value = "AOV Top-50"
+                if ws["B1"].value != "RugVista 100": ws["B1"].value = "RugVista 100"
+                if ws["C1"].value != "RugVista 50": ws["C1"].value = "RugVista 50"
                 next_row = ws.max_row + 1
             ws[f"A{next_row}"].value = timestamp_str
             ws[f"B{next_row}"].value = aov_int
@@ -150,7 +152,7 @@ def append_to_excel(timestamp_str: str, aov_int: int, aov_top50_int: int,
             wb.save(path)
         else:
             with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="new") as w:
-                pd.DataFrame([row], columns=["Datum", "AOV", "AOV Top-50"]).to_excel(
+                pd.DataFrame([row], columns=cols).to_excel(
                     w, index=False, sheet_name=sheet
                 )
     except Exception:
@@ -162,6 +164,7 @@ def append_to_excel(timestamp_str: str, aov_int: int, aov_top50_int: int,
             df = pd.DataFrame([row])
         with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="overlay") as w:
             df.to_excel(w, index=False, sheet_name=sheet)
+
 
 def main():
     prices_all, prices_p1 = fetch_all_prices()
@@ -189,7 +192,7 @@ def main():
         return f"{n:,}".replace(",", " ")
 
     # Endast en snygg rad i terminalen
-    print(f"RugVista: AOV = {fmt(aov)} för alla och AOV Top-50 = {fmt(aov_top50)}.")
+    print(f"RugVista AOV: Top-100 = {fmt(aov)} & Top-50 = {fmt(aov_top50)}.")
 
 
 if __name__ == "__main__":

@@ -54,10 +54,6 @@ jobs:
           echo " "
           outputs[adtraction_stats]="$(python -u -m scripts.adtraction_stats 2>&1)"; rc[adtraction_stats]=$?
           echo "${outputs[adtraction_stats]}"
-
-          echo " "
-          outputs[adtraction_epc_finance]="$(python -u -m scripts.adtraction_epc_finance 2>&1)"; rc[adtraction_epc_finance]=$?
-          echo "${outputs[adtraction_epc_finance]}"
           
           echo " "
           outputs[adtraction_epc_afin]="$(python -u -m scripts.adtraction_epc_afin 2>&1)"; rc[adtraction_epc_afin]=$?
@@ -66,6 +62,10 @@ jobs:
           echo " "
           outputs[rugvista_aov]="$(python -u -m scripts.rugvista_aov 2>&1)"; rc[rugvista_aov]=$?
           echo "${outputs[rugvista_aov]}"
+          outputs[benuta_aov]="$(python -u -m scripts.benuta_aov 2>&1)"; rc[benuta_aov]=$?
+          echo "${outputs[benuta_aov]}"
+          outputs[trendcarpet_aov]="$(python -u -m scripts.trendcarpet_aov 2>&1)"; rc[trendcarpet_aov]=$?
+          echo "${outputs[trendcarpet_aov]}"
 
           echo " "
           outputs[soder_stats]="$(python -u -m scripts.soder_stats 2>&1)"; rc[soder_stats]=$?
@@ -97,9 +97,10 @@ jobs:
             scripts=(
               "eql_find"
               "adtraction_stats"
-              "adtraction_epc_finance"
               "adtraction_epc_afin"
               "rugvista_aov"
+              "benuta_aov"
+              "trendcarpet_aov"
               "soder_stats"
               "soder_ads"
               # "fractal_refine"
