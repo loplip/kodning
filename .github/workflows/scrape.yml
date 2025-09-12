@@ -98,6 +98,7 @@ jobs:
               "eql_find"
               "adtraction_stats"
               "adtraction_epc_finance"
+              "adtraction_epc_afin"
               "rugvista_aov"
               "soder_stats"
               "soder_ads"
