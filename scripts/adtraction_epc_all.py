@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from scripts.common.paths import DATA_DIR
+from scripts.common.paths import DATA_DIR, SOURCES_DIR
 
 # =========================
 # KONFIG
@@ -20,6 +20,7 @@ EMAIL = "filip.helmroth@gmail.com"
 PASSWORD = "Hejsan123"
 
 XLSX = DATA_DIR / "data_epc_all.xlsx"
+AUTH_STATE = SOURCES_DIR / "base_auth.json"
 SHEET = "EPC"
 
 HEADLESS = True
@@ -281,13 +282,13 @@ async def main():
         await pwd_locator.fill(PASSWORD)
         await page_login.locator("button.btn.btn-primary[type=submit]").click()
         await page_login.wait_for_url(re.compile(r"secure\.adtraction\.com/partner/.*"))
-        await ctx_base.storage_state(path="base_auth.json")
+        await ctx_base.storage_state(path=str(AUTH_STATE))
         await ctx_base.close()
 
         # land/kategori
         for country_name, country_id, cc, _ in enabled_countries:
             for cat_name, cat_id in CATEGORIES:
-                ctx = await browser.new_context(storage_state="base_auth.json")
+                ctx = await browser.new_context(storage_state=str(AUTH_STATE))
                 page = await ctx.new_page()
                 label = f"{cat_name} ({cc})"
                 try:
