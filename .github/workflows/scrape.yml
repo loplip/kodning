@@ -77,17 +77,21 @@ jobs:
           outputs[soder_ads]="$(python -u -m scripts.soder_ads 2>&1)"; rc[soder_ads]=$?
           echo "${outputs[soder_ads]}"
 
-          # echo " "
-          # outputs[fractal_refine]="$(python -u -m scripts.fractal_refine 2>&1)"; rc[fractal_refine]=$?
-          # echo "${outputs[fractal_refine]}"
-
-          # echo " "
-          # outputs[fractal_scape]="$(python -u -m scripts.fractal_scape 2>&1)"; rc[fractal_scape]=$?
-          # echo "${outputs[fractal_scape]}"
-
           echo " "
           outputs[sitemap_fetch]="$(python -u -m scripts.sitemap_fetch 2>&1)"; rc[sitemap_fetch]=$?
           echo "${outputs[sitemap_fetch]}"
+
+          # ===== Var 3:e dag: adtraction_epc_all.py =====      
+          echo " "
+          doy=$(date +%j)                                       
+          if (( doy % 3 == 0 )); then                           
+            echo "Kör adtraction_epc_all (var 3:e dag)"         
+            outputs[adtraction_epc_all]="$(python -u -m scripts.adtraction_epc_all 2>&1)"; rc[adtraction_epc_all]=$?   
+            echo "${outputs[adtraction_epc_all]}"               
+          else                                                  
+            echo "Hoppar adtraction_epc_all idag (inte var 3:e dag)."  
+            outputs[adtraction_epc_all]="SKIPPED"; rc[adtraction_epc_all]=0
+          fi
 
 
           {
@@ -106,9 +110,8 @@ jobs:
               "trendcarpet_aov"
               "soder_stats"
               "soder_ads"
-              # "fractal_refine"
-              # "fractal_scape"
               "sitemap_fetch"
+              "adtraction_epc_all"
             )
 
             for k in "${scripts[@]}"; do
@@ -146,33 +149,3 @@ jobs:
           fi
           git commit -m "chore: update data files [skip ci]"
           git push origin HEAD:${GITHUB_REF_NAME:-main}
-
-
-      #- name: Lägg till backup-filer i ./history
-      #  if: always()
-      #  run: |
-      #    mkdir -p history
-      #    TODAY=$(date +%Y-%m-%d)
-      #    MODIFIED=$(git diff --name-only HEAD -- data/*.xlsx || true)
-      #    NEW=$(git ls-files --others --exclude-standard -- data/*.xlsx || true)
-      #    for f in $MODIFIED $NEW; do
-      #      [ -f "$f" ] || continue
-      #      base=$(basename "$f")
-      #      dest="history/backup_${TODAY}_$base"
-      #      cp "$f" "$dest"
-      #      echo "Backup: $f -> $dest"
-      #    done
-
-      #- name: Commita & pusha uppdaterade filer
-      #  if: always()
-      #  run: |
-      #    git config user.name  "github-actions[bot]"
-      #    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      #    git add data/*.xlsx || true
-      #    git add history/backup_*.xlsx || true
-      #    if git diff --cached --quiet; then
-      #      echo "Inga ändringar att committa."
-      #      exit 0
-      #    fi
-      #    git commit -m "chore: update data files + selective backups [skip ci]"
-      #    git push origin HEAD:${GITHUB_REF_NAME:-main}
