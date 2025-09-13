@@ -192,7 +192,7 @@ def main():
         return f"{n:,}".replace(",", " ")
 
     # Endast en snygg rad i terminalen
-    print(f"RugVista AOV: Top-100 = {fmt(aov)} & Top-50 = {fmt(aov_top50)}.")
+    print(f"RugVista AOV: 100 = {fmt(aov)} & 50 = {fmt(aov_top50)}.")
 
 
 if __name__ == "__main__":

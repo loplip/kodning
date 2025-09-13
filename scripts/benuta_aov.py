@@ -331,7 +331,7 @@ def main():
     def fmt(n: int | None) -> str:
         return "–" if n is None else f"{n:,}".replace(",", " ")
 
-    print(f"Benuta AOV: Top-100 = {fmt(aov100)} & Top-50 = {fmt(aov50)}.")
+    print(f"Benuta AOV: 100 = {fmt(aov100)} & 50 = {fmt(aov50)}.")
 
 if __name__ == "__main__":
     main()
