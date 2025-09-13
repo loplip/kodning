@@ -58,6 +58,8 @@ jobs:
           echo " "
           outputs[adtraction_epc_finance]="$(python -u -m scripts.adtraction_epc_finance 2>&1)"; rc[adtraction_epc_finance]=$?
           echo "${outputs[adtraction_epc_finance]}"
+          outputs[adtraction_epc_brands]="$(python -u -m scripts.adtraction_epc_brands 2>&1)"; rc[adtraction_epc_brands]=$?
+          echo "${outputs[adtraction_epc_brands]}"
 
           echo " "
           outputs[rugvista_aov]="$(python -u -m scripts.rugvista_aov 2>&1)"; rc[rugvista_aov]=$?
@@ -98,6 +100,7 @@ jobs:
               "eql_find"
               "adtraction_stats"
               "adtraction_epc_finance"
+              "adtraction_epc_brands"
               "rugvista_aov"
               "benuta_aov"
               "trendcarpet_aov"
